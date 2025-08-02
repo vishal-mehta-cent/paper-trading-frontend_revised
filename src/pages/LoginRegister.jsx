@@ -1,8 +1,9 @@
 import React, { useState } from "react";
+import axios from "axios";
 import { GoogleLogin } from "@react-oauth/google";
 import jwt_decode from "jwt-decode";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
+const BASE_URL = import.meta.env.VITE_BACKEND_URL;
 
 export default function LoginRegister({ onLoginSuccess }) {
   const [username, setUsername] = useState("");
@@ -12,93 +13,102 @@ export default function LoginRegister({ onLoginSuccess }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    const endpoint = isLogin ? "login" : "register";
+    setError("");
 
     try {
-      const res = await fetch(`${BACKEND_URL}/auth/${endpoint}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username, password }),
+      const endpoint = isLogin ? "login" : "register";
+      const response = await axios.post(`${BASE_URL}/auth/${endpoint}`, {
+        username,
+        password,
       });
 
-      const data = await res.json();
-      if (res.ok) {
-        onLoginSuccess(data.user || username); // call parent handler ✅
+      if (response.status === 200) {
+        localStorage.setItem("username", username);
+        onLoginSuccess(username);
       } else {
-        setError(data.detail || "Authentication failed");
+        setError("Unexpected response from server.");
       }
     } catch (err) {
-      setError("Server error");
+      console.error(err);
+      setError(err.response?.data?.detail || "Login/Register failed");
     }
   };
 
   const handleGoogleSuccess = async (credentialResponse) => {
+    const decoded = jwt_decode(credentialResponse.credential);
+    const name = decoded.name || decoded.email;
+
     try {
-      const decoded = jwt_decode(credentialResponse.credential);
-      const res = await fetch(`${BACKEND_URL}/auth/google-login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: decoded.email }),
+      const response = await axios.post(`${BASE_URL}/auth/google-login`, {
+        token: credentialResponse.credential,
       });
 
-      const data = await res.json();
-      if (res.ok) {
-        onLoginSuccess(data.user || decoded.email); // call parent handler ✅
+      if (response.status === 200) {
+        localStorage.setItem("username", name);
+        onLoginSuccess(name);
       } else {
-        setError(data.detail || "Google login failed");
+        setError("Google login failed.");
       }
     } catch (err) {
-      setError("Google login error");
+      console.error(err);
+      setError(err.response?.data?.detail || "Google login failed");
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-100">
-      <div className="bg-white p-8 rounded shadow-md w-full max-w-sm">
-        <h2 className="text-2xl font-bold mb-4 text-center">
+    <div className="flex justify-center items-center h-screen bg-gray-100">
+      <div className="w-full max-w-md p-6 bg-white rounded-lg shadow-md">
+        <h2 className="text-2xl font-bold text-center mb-4">
           {isLogin ? "Login" : "Register"}
         </h2>
 
+        {error && (
+          <p className="text-red-500 text-center text-sm mb-2">{error}</p>
+        )}
+
         <form onSubmit={handleSubmit}>
           <input
+            type="text"
             placeholder="Username"
-            className="w-full mb-2 px-3 py-2 border rounded"
+            className="w-full p-2 mb-4 border border-gray-300 rounded"
             value={username}
             onChange={(e) => setUsername(e.target.value)}
             required
           />
+
           <input
-            placeholder="Password"
             type="password"
-            className="w-full mb-2 px-3 py-2 border rounded"
+            placeholder="Password"
+            className="w-full p-2 mb-4 border border-gray-300 rounded"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             required
           />
+
           <button
             type="submit"
-            className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition"
+            className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700"
           >
             {isLogin ? "Login" : "Register"}
           </button>
         </form>
 
-        <p className="mt-3 text-center text-sm">
+        <p className="mt-4 text-center text-sm">
           {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
-          <button
-            className="text-blue-500 hover:underline"
+          <span
             onClick={() => setIsLogin(!isLogin)}
+            className="text-blue-600 cursor-pointer hover:underline"
           >
             {isLogin ? "Register" : "Login"}
-          </button>
+          </span>
         </p>
 
-        <div className="my-4 text-center">OR</div>
-        <GoogleLogin onSuccess={handleGoogleSuccess} />
-
-        {error && (
-          <p className="text-red-600 mt-2 text-center text-sm">{error}</p>
-        )}
+        <div className="mt-6">
+          <GoogleLogin
+            onSuccess={handleGoogleSuccess}
+            onError={() => setError("Google Sign In Failed")}
+          />
+        </div>
       </div>
     </div>
   );
