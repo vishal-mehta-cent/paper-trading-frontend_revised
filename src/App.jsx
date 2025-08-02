@@ -42,7 +42,12 @@ export default function App() {
     else localStorage.removeItem("username");
   }, [username]);
 
-  const handleLoginSuccess = (u) => setUsername(u);
+  const handleLoginSuccess = (user) => {
+    console.log("Login success:", user);
+    setUsername(user);
+    window.location.href = "/menu"; // ✅ Redirect to menu after login/register
+  };
+
   const handleLogout = () => setUsername(null);
 
   return (

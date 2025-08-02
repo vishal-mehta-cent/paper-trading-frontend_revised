@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import jwt_decode from "jwt-decode";
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL; // ✅ Read from env
+const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 
 export default function LoginRegister({ onLoginSuccess }) {
   const [username, setUsername] = useState("");
@@ -23,7 +23,7 @@ export default function LoginRegister({ onLoginSuccess }) {
 
       const data = await res.json();
       if (res.ok) {
-        onLoginSuccess(data.user); // pass user data to parent
+        onLoginSuccess(data.user || username); // call parent handler ✅
       } else {
         setError(data.detail || "Authentication failed");
       }
@@ -43,7 +43,7 @@ export default function LoginRegister({ onLoginSuccess }) {
 
       const data = await res.json();
       if (res.ok) {
-        onLoginSuccess(data.user);
+        onLoginSuccess(data.user || decoded.email); // call parent handler ✅
       } else {
         setError(data.detail || "Google login failed");
       }
@@ -53,35 +53,53 @@ export default function LoginRegister({ onLoginSuccess }) {
   };
 
   return (
-    <div>
-      <h2>{isLogin ? "Login" : "Register"}</h2>
-      <form onSubmit={handleSubmit}>
-        <input
-          placeholder="Username"
-          value={username}
-          onChange={(e) => setUsername(e.target.value)}
-          required
-        /><br />
-        <input
-          placeholder="Password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        /><br />
-        <button type="submit">{isLogin ? "Login" : "Register"}</button>
-      </form>
+    <div className="min-h-screen flex items-center justify-center bg-gray-100">
+      <div className="bg-white p-8 rounded shadow-md w-full max-w-sm">
+        <h2 className="text-2xl font-bold mb-4 text-center">
+          {isLogin ? "Login" : "Register"}
+        </h2>
 
-      <p>
-        {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
-        <button onClick={() => setIsLogin(!isLogin)}>
-          {isLogin ? "Register" : "Login"}
-        </button>
-      </p>
+        <form onSubmit={handleSubmit}>
+          <input
+            placeholder="Username"
+            className="w-full mb-2 px-3 py-2 border rounded"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            required
+          />
+          <input
+            placeholder="Password"
+            type="password"
+            className="w-full mb-2 px-3 py-2 border rounded"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            required
+          />
+          <button
+            type="submit"
+            className="w-full bg-blue-600 text-white py-2 rounded hover:bg-blue-700 transition"
+          >
+            {isLogin ? "Login" : "Register"}
+          </button>
+        </form>
 
-      <hr />
-      <GoogleLogin onSuccess={handleGoogleSuccess} />
-      {error && <p style={{ color: "red" }}>{error}</p>}
+        <p className="mt-3 text-center text-sm">
+          {isLogin ? "Don't have an account?" : "Already have an account?"}{" "}
+          <button
+            className="text-blue-500 hover:underline"
+            onClick={() => setIsLogin(!isLogin)}
+          >
+            {isLogin ? "Register" : "Login"}
+          </button>
+        </p>
+
+        <div className="my-4 text-center">OR</div>
+        <GoogleLogin onSuccess={handleGoogleSuccess} />
+
+        {error && (
+          <p className="text-red-600 mt-2 text-center text-sm">{error}</p>
+        )}
+      </div>
     </div>
   );
 }
