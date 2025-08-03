@@ -31,3 +31,10 @@
     "vite": "^5.0.0"
   }
 }
+
+
+"scripts": {
+  "preinstall": "echo 'Running npm install' && ls node_modules/.bin",
+  "build": "vite build",
+  ...
+}
