@@ -1,0 +1,12 @@
+{
+  "projectId": "your-project-id",
+  "orgId": "your-org-id",
+  "settings": {
+    "framework": "vite",
+    "buildCommand": "npm run build",
+    "installCommand": "npm install",
+    "outputDirectory": "dist",
+    "devCommand": "npm run dev",
+    "rootDirectory": "."
+  }
+}
