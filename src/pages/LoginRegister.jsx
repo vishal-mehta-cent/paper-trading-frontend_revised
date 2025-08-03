@@ -1,3 +1,4 @@
+
 import React, { useState } from "react";
 import { GoogleLogin } from "@react-oauth/google";
 import jwt_decode from "jwt-decode";
@@ -9,8 +10,6 @@ export default function LoginRegister({ onLoginSuccess }) {
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-
-  console.log("🧠 Google Client ID:", import.meta.env.VITE_GOOGLE_CLIENT_ID);
 
   const backendBaseUrl = import.meta.env.VITE_BACKEND_BASE_URL || "http://127.0.0.1:8000";
   const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
