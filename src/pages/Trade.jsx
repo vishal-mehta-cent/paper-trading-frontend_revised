@@ -81,13 +81,25 @@ export default function Trade({ username }) {
       .then(setSuggestions);
   }
 
-  function goDetail(sym) {
-    const quote = quotes[sym] || {};
-    setSelectedSymbol(sym);
-    setSelectedQuote(quote);
-    setQuery("");
-    setSuggestions([]);
-  }
+ function goDetail(sym) {
+  // Immediately fetch latest quote for the clicked symbol
+  fetch(`http://127.0.0.1:8000/quotes?symbols=${sym}`)
+    .then(r => r.json())
+    .then(arr => {
+      const latestQuote = arr.length > 0 ? arr[0] : {};
+      setSelectedSymbol(sym);
+      setSelectedQuote(latestQuote);
+      setQuery("");
+      setSuggestions([]);
+    })
+    .catch(err => {
+      console.error("Failed to fetch immediate quote:", err);
+      setSelectedSymbol(sym);
+      setSelectedQuote(quotes[sym] || {}); // fallback
+      setQuery("");
+      setSuggestions([]);
+    });
+}
 
   function handleAddToWatchlist() {
     fetch(`http://127.0.0.1:8000/watchlist/${username}`, {

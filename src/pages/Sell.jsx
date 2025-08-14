@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import BackButton from "../components/BackButton";
 
 export default function Sell() {
   const { symbol } = useParams();
@@ -33,44 +34,44 @@ export default function Sell() {
     return () => clearInterval(interval);
   }, [symbol, price]);
 
-  const handleSubmit = () => {
-    setError("");
+ const handleSubmit = () => {
+  setError("");
 
-    if (!qty || !price || isNaN(qty) || isNaN(price) || +qty <= 0 || +price <= 0) {
-      setError("❌ Please enter valid quantity and price (numbers only).");
-      return;
-    }
+  if (!qty || !price || isNaN(qty) || isNaN(price) || +qty <= 0 || +price <= 0) {
+    setError("❌ Please enter valid quantity and price (numbers only).");
+    return;
+  }
 
-    fetch(`http://127.0.0.1:8000/orders/close`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: localStorage.getItem("username"),
-        script: symbol,
-        order_type: "SELL",
-        qty: parseInt(qty),
-        price: parseFloat(price),
-        exchange,
-        segment,
-      }),
+  fetch(`http://127.0.0.1:8000/orders`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      username: localStorage.getItem("username"),
+      script: symbol,
+      order_type: "SELL",
+      qty: parseInt(qty),
+      price: parseFloat(price),
+      exchange,
+      segment,
+    }),
+  })
+    .then(async (res) => {
+      if (!res.ok) {
+        const err = await res.json();
+        setError(err.detail || "Failed to sell");
+      } else {
+        playSuccessSound();
+        setSuccessModal(true);
+        setQty("");
+        setPrice("");
+        setTimeout(() => {
+          setSuccessModal(false);
+          nav("/orders");
+        }, 4000);
+      }
     })
-      .then(async (res) => {
-        if (!res.ok) {
-          const err = await res.json();
-          setError(err.detail || "Failed to sell");
-        } else {
-          playSuccessSound();
-          setSuccessModal(true);
-          setQty("");
-          setPrice("");
-          setTimeout(() => {
-            setSuccessModal(false);
-            nav("/trade");
-          }, 4000);
-        }
-      })
-      .catch(() => setError("Server error"));
-  };
+    .catch(() => setError("Server error"));
+};
 
   const playSuccessSound = () => {
     const audio = new Audio("/success.mp3"); // Add success.mp3 in public/
@@ -79,6 +80,7 @@ export default function Sell() {
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 md:max-w-xl md:mx-auto flex flex-col justify-between">
+      <BackButton to="/trade" />
       <div className="space-y-5">
         <h2 className="text-2xl font-bold text-center text-red-600">SELL {symbol}</h2>
 
@@ -175,7 +177,7 @@ export default function Sell() {
               <div className="animate-bounce text-green-600 text-6xl">✅</div>
             </div>
             <p className="text-lg font-semibold text-green-700">
-              {symbol} sell successful!
+            Order Is Sell Sucessfully
             </p>
           </div>
         </div>

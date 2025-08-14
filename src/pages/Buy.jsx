@@ -1,87 +1,150 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import BackButton from "../components/BackButton";
+
+const API = "http://localhost:8000"; // keep host consistent with your backend
 
 export default function Buy() {
   const { symbol } = useParams();
   const nav = useNavigate();
+
   const [qty, setQty] = useState("");
   const [price, setPrice] = useState("");
   const [exchange, setExchange] = useState("NSE");
   const [segment, setSegment] = useState("intraday");
   const [stoploss, setStoploss] = useState("");
   const [target, setTarget] = useState("");
+
   const [errorMsg, setErrorMsg] = useState("");
   const [successModal, setSuccessModal] = useState(false);
+  const [successText, setSuccessText] = useState(""); // dynamic success message
   const [livePrice, setLivePrice] = useState(null);
 
-  // ✅ Fetch Live Price
+  const [orderMode, setOrderMode] = useState("MARKET"); // MARKET or LIMIT
+  const username = localStorage.getItem("username");
+
+  // Fetch live price periodically
   useEffect(() => {
-    const fetchLive = () => {
-      fetch(`http://127.0.0.1:8000/quotes?symbols=${symbol}`)
-        .then((res) => res.json())
-        .then((data) => {
-          if (data && data[0]) {
-            const live = parseFloat(data[0].price).toFixed(2);
+    if (!symbol) return;
+
+    let cancelled = false;
+    const fetchLive = async () => {
+      try {
+        const res = await fetch(`${API}/quotes?symbols=${symbol}`);
+        const data = await res.json();
+        if (!cancelled && data && data[0]) {
+          const live = Number(data[0].price);
+          if (Number.isFinite(live)) {
             setLivePrice(live);
-            if (!price) setPrice(live); // auto-fill if empty
+            // If LIMIT selected and price field empty, auto-fill with live
+            if (orderMode === "LIMIT" && !price) {
+              setPrice(live.toFixed(2));
+            }
           }
-        });
+        }
+      } catch {}
     };
 
     fetchLive();
-    const interval = setInterval(fetchLive, 3000);
-    return () => clearInterval(interval);
-  }, [symbol, price]);
+    const id = setInterval(fetchLive, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(id);
+    };
+  }, [symbol, API, orderMode, price]);
 
-  const handleSubmit = () => {
+  const playSuccessSound = () => {
+    try {
+      const audio = new Audio("/success.mp3"); // put success.mp3 in public/
+      audio.play();
+    } catch {}
+  };
+
+  const handleSubmit = async () => {
     setErrorMsg("");
+    setSuccessText("");
 
-    // ✅ Validation
-    if (!qty || !price || isNaN(qty) || isNaN(price) || +qty <= 0 || +price <= 0) {
-      setErrorMsg("❌ Please enter valid quantity and price (numbers only).");
+    if (!username) {
+      setErrorMsg("❌ Please login again (username missing).");
+      return;
+    }
+    if (!symbol) {
+      setErrorMsg("❌ Invalid symbol.");
+      return;
+    }
+    const qtyNum = Number(qty);
+    if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
+      setErrorMsg("❌ Please enter a valid quantity (> 0).");
       return;
     }
 
-    fetch(`http://127.0.0.1:8000/orders`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        username: localStorage.getItem("username"),
-        script: symbol,
-        order_type: "BUY",
-        qty: parseInt(qty),
-        price: parseFloat(price),
-        exchange,
-        segment,
-      }),
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const err = await res.json();
-          setErrorMsg(err.detail || "Failed to Buy");
-        } else {
-          playSuccessSound();
-          setSuccessModal(true);
-          setQty("");
-          setPrice("");
-          setTimeout(() => {
-            setSuccessModal(false);
-            nav("/trade");
-          }, 4000);
-        }
-      })
-      .catch(() => setErrorMsg("Server error"));
-  };
+    // Build payload for backend
+    const payload = {
+      username,
+      script: symbol.toUpperCase(),
+      order_type: "BUY",      // your DB uses BUY/SELL in this field
+      order_mode: orderMode,  // MARKET or LIMIT (NEW)
+      qty: qtyNum,
+      exchange,
+      segment,
+    };
 
-  const playSuccessSound = () => {
-    const audio = new Audio("/success.mp3"); // Place this file in `public/` folder
-    audio.play();
+    if (orderMode === "LIMIT") {
+      const px = Number(price);
+      if (!Number.isFinite(px) || px <= 0) {
+        setErrorMsg("❌ Please enter a valid limit price.");
+        return;
+      }
+      payload.price = px;
+    } else {
+      // MARKET: backend will use current live price
+      payload.price = null;
+    }
+
+    try {
+      const res = await fetch(`${API}/orders`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data?.detail || "Order failed");
+      }
+
+      // Frontend text as per requirement
+      if (orderMode === "MARKET") {
+        setSuccessText("Order is successfully placed.");
+      } else {
+        setSuccessText("Buy successfully.");
+      }
+
+      playSuccessSound();
+      setSuccessModal(true);
+
+      // Reset some inputs (keep symbol)
+      setQty("");
+      if (orderMode === "LIMIT") setPrice("");
+
+      // Optionally navigate after a short delay
+      setTimeout(() => {
+        setSuccessModal(false);
+        nav("/orders");
+      }, 3000);
+    } catch (e) {
+      setErrorMsg(e.message || "Server error");
+    }
   };
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 md:max-w-xl md:mx-auto flex flex-col justify-between">
+      <BackButton to="/trade" />
       <div className="space-y-5">
-        <h2 className="text-2xl font-bold text-center text-green-600">BUY {symbol}</h2>
+        <h2 className="text-2xl font-bold text-center text-green-600">
+          BUY {symbol}
+        </h2>
 
         {errorMsg && (
           <div className="text-red-700 bg-red-100 p-3 rounded text-center">
@@ -89,14 +152,39 @@ export default function Buy() {
           </div>
         )}
 
-        {/* ✅ Live Price */}
+        {/* Live Price */}
         <div className="text-sm text-center text-gray-700 mb-2">
           Live Price:{" "}
           <span className="font-semibold text-green-600">
-            ₹{livePrice || "--"}
+            {livePrice != null ? `₹${livePrice.toFixed(2)}` : "--"}
           </span>
         </div>
 
+        {/* Order Mode */}
+        <div className="flex justify-center gap-4">
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              name="ordermode"
+              value="MARKET"
+              checked={orderMode === "MARKET"}
+              onChange={() => setOrderMode("MARKET")}
+            />
+            <span>Buy @ Live (Market)</span>
+          </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="radio"
+              name="ordermode"
+              value="LIMIT"
+              checked={orderMode === "LIMIT"}
+              onChange={() => setOrderMode("LIMIT")}
+            />
+            <span>Buy @ My Price (Limit)</span>
+          </label>
+        </div>
+
+        {/* Quantity */}
         <input
           type="number"
           inputMode="numeric"
@@ -107,16 +195,21 @@ export default function Buy() {
           className="w-full px-4 py-3 border rounded-lg"
         />
 
+        {/* Price (for LIMIT) */}
         <input
           type="number"
           inputMode="decimal"
           pattern="\d*"
-          value={price}
+          value={orderMode === "LIMIT" ? price : ""}
           onChange={(e) => setPrice(e.target.value)}
-          placeholder="Limit Price"
-          className="w-full px-4 py-3 border rounded-lg"
+          placeholder={orderMode === "LIMIT" ? "Limit Price" : "Disabled for Market orders"}
+          className={`w-full px-4 py-3 border rounded-lg ${
+            orderMode === "MARKET" ? "bg-gray-100 cursor-not-allowed" : ""
+          }`}
+          disabled={orderMode === "MARKET"}
         />
 
+        {/* Segment */}
         <div className="flex justify-between">
           <button
             onClick={() => setSegment("intraday")}
@@ -136,6 +229,7 @@ export default function Buy() {
           </button>
         </div>
 
+        {/* Exchange */}
         <div className="flex justify-between">
           <button
             onClick={() => setExchange("NSE")}
@@ -155,6 +249,7 @@ export default function Buy() {
           </button>
         </div>
 
+        {/* Optional SL/Target (kept in state for future use) */}
         <input
           type="number"
           value={stoploss}
@@ -162,7 +257,6 @@ export default function Buy() {
           placeholder="Stoploss (optional)"
           className="w-full px-4 py-3 border rounded-lg"
         />
-
         <input
           type="number"
           value={target}
@@ -179,7 +273,7 @@ export default function Buy() {
         BUY
       </button>
 
-      {/* ✅ Success Modal */}
+      {/* Success Modal */}
       {successModal && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-xl text-center shadow-lg">
@@ -187,7 +281,7 @@ export default function Buy() {
               <div className="animate-bounce text-green-600 text-6xl">✅</div>
             </div>
             <p className="text-lg font-semibold text-green-700">
-              {symbol} buy successful!
+              {successText || "Order is successfully placed."}
             </p>
           </div>
         </div>

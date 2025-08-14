@@ -10,24 +10,36 @@ export default function Funds({ username }) {
 
   // ✅ Fetch funds
   const fetchFunds = () => {
-    if (!username) return;
+  if (!username) return;
 
-    setLoading(true);
-    fetch(`http://127.0.0.1:8000/funds/available/${encodeURIComponent(username)}`)
-      .then((res) => {
-        if (!res.ok) throw new Error("Failed to fetch funds");
-        return res.json();
-      })
-      .then((data) => {
+  setLoading(true);
+  setMessage(""); // Clear message initially
+
+  fetch(`http://127.0.0.1:8000/funds/available/${encodeURIComponent(username)}`)
+    .then((res) => {
+      if (!res.ok) {
+        if (res.status === 404) {
+          // New user, no fund record yet – not an error
+          setTotalFunds(0);
+          setAvailableFunds(0);
+          return null;
+        }
+        throw new Error("Server error");
+      }
+      return res.json();
+    })
+    .then((data) => {
+      if (data) {
         setTotalFunds(data.total_funds || 0);
         setAvailableFunds(data.available_funds || 0);
-      })
-      .catch((err) => {
-        console.error("Error loading funds:", err);
-        setMessage("❌ Failed to load fund details");
-      })
-      .finally(() => setLoading(false));
-  };
+      }
+    })
+    .catch((err) => {
+      console.error("Error loading funds:", err);
+      setMessage("❌ Failed to load fund details");
+    })
+    .finally(() => setLoading(false));
+};
 
   useEffect(() => {
     fetchFunds();
