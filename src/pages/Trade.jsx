@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { Search, ClipboardList, User, Briefcase } from "lucide-react";
 import ScriptDetailsModal from "../components/ScriptDetailsModal";
 import BackButton from "../components/BackButton";
+import { moneyINR } from "../utils/format";
 
 export default function Trade({ username }) {
   const [tab, setTab] = useState("mylist");
@@ -129,7 +130,7 @@ export default function Trade({ username }) {
       <div className="sticky top-0 z-50 p-4 bg-white rounded-b-2xl shadow relative">
         {/* 💰 Centered Funds Row */}
         <div className="text-center mt-2 text-sm text-gray-100 font-medium bg-gray-800 py-2 rounded mb-3">
-          Total Funds: ₹{(totalFunds || 0).toLocaleString()} &nbsp;|&nbsp; Available: ₹{(availableFunds || 0).toLocaleString()}
+          Total Funds: {moneyINR(totalFunds, { decimals: 0 })} &nbsp;|&nbsp; Available: {moneyINR(availableFunds, { decimals: 0 })}
         </div>
 
         {/* Center Title & Tabs */}

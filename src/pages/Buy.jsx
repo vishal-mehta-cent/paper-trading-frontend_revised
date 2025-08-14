@@ -1,3 +1,4 @@
+// frontend/src/pages/Buy.jsx
 import React, { useState, useEffect } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import BackButton from "../components/BackButton";
@@ -17,17 +18,20 @@ export default function Buy() {
 
   const [errorMsg, setErrorMsg] = useState("");
   const [successModal, setSuccessModal] = useState(false);
-  const [successText, setSuccessText] = useState(""); // dynamic success message
+  const [successText, setSuccessText] = useState("");
   const [livePrice, setLivePrice] = useState(null);
 
   const [orderMode, setOrderMode] = useState("MARKET"); // MARKET or LIMIT
+  const [submitting, setSubmitting] = useState(false);
+
   const username = localStorage.getItem("username");
 
-  // Fetch live price periodically
+  // -------- Live price (immediate + polling) --------
   useEffect(() => {
     if (!symbol) return;
 
     let cancelled = false;
+
     const fetchLive = async () => {
       try {
         const res = await fetch(`${API}/quotes?symbols=${symbol}`);
@@ -36,72 +40,74 @@ export default function Buy() {
           const live = Number(data[0].price);
           if (Number.isFinite(live)) {
             setLivePrice(live);
-            // If LIMIT selected and price field empty, auto-fill with live
+            // If LIMIT selected and price empty, auto-fill with live
             if (orderMode === "LIMIT" && !price) {
               setPrice(live.toFixed(2));
             }
           }
         }
-      } catch {}
+      } catch {
+        /* ignore */
+      }
     };
 
+    // call immediately, then poll
     fetchLive();
     const id = setInterval(fetchLive, 3000);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, [symbol, API, orderMode, price]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [symbol, orderMode]); // (avoid putting `price` or `API` here)
 
   const playSuccessSound = () => {
     try {
       const audio = new Audio("/success.mp3"); // put success.mp3 in public/
       audio.play();
-    } catch {}
+    } catch {
+      /* ignore sound errors */
+    }
   };
 
   const handleSubmit = async () => {
+    if (submitting) return;
+    setSubmitting(true);
     setErrorMsg("");
     setSuccessText("");
 
-    if (!username) {
-      setErrorMsg("❌ Please login again (username missing).");
-      return;
-    }
-    if (!symbol) {
-      setErrorMsg("❌ Invalid symbol.");
-      return;
-    }
-    const qtyNum = Number(qty);
-    if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
-      setErrorMsg("❌ Please enter a valid quantity (> 0).");
-      return;
-    }
-
-    // Build payload for backend
-    const payload = {
-      username,
-      script: symbol.toUpperCase(),
-      order_type: "BUY",      // your DB uses BUY/SELL in this field
-      order_mode: orderMode,  // MARKET or LIMIT (NEW)
-      qty: qtyNum,
-      exchange,
-      segment,
-    };
-
-    if (orderMode === "LIMIT") {
-      const px = Number(price);
-      if (!Number.isFinite(px) || px <= 0) {
-        setErrorMsg("❌ Please enter a valid limit price.");
-        return;
-      }
-      payload.price = px;
-    } else {
-      // MARKET: backend will use current live price
-      payload.price = null;
-    }
-
     try {
+      if (!username) {
+        throw new Error("❌ Please login again (username missing).");
+      }
+      if (!symbol) {
+        throw new Error("❌ Invalid symbol.");
+      }
+      const qtyNum = Number(qty);
+      if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
+        throw new Error("❌ Please enter a valid quantity (> 0).");
+      }
+
+      // Build payload for backend
+      const payload = {
+        username,
+        script: symbol.toUpperCase(),
+        order_type: "BUY",     // BUY action
+        qty: qtyNum,
+        exchange,
+        segment,
+      };
+
+      if (orderMode === "LIMIT") {
+        const px = Number(price);
+        if (!Number.isFinite(px) || px <= 0) {
+          throw new Error("❌ Please enter a valid limit price.");
+        }
+        payload.price = px; // LIMIT trigger price
+      } else {
+        payload.price = null; // MARKET; backend should use current live
+      }
+
       const res = await fetch(`${API}/orders`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -109,16 +115,24 @@ export default function Buy() {
       });
 
       const data = await res.json().catch(() => ({}));
-
       if (!res.ok) {
         throw new Error(data?.detail || "Order failed");
       }
 
-      // Frontend text as per requirement
-      if (orderMode === "MARKET") {
-        setSuccessText("Order is successfully placed.");
+      // ---- Decide popup text based on backend response ----
+      // We support multiple shapes for robustness:
+      // - { triggered: true/false }
+      // - { message: "EXECUTED" | "PLACED" }
+      // - { status: "filled" | "open" }
+      const triggered =
+        data.triggered === true ||
+        String(data?.message || "").toUpperCase() === "EXECUTED" ||
+        String(data?.status || "").toLowerCase() === "filled";
+
+      if (triggered) {
+        setSuccessText("Buy successfully");
       } else {
-        setSuccessText("Buy successfully.");
+        setSuccessText("Order is placed");
       }
 
       playSuccessSound();
@@ -128,13 +142,15 @@ export default function Buy() {
       setQty("");
       if (orderMode === "LIMIT") setPrice("");
 
-      // Optionally navigate after a short delay
+      // navigate to Orders after a brief pause
       setTimeout(() => {
         setSuccessModal(false);
         nav("/orders");
-      }, 3000);
+      }, 1500);
     } catch (e) {
       setErrorMsg(e.message || "Server error");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -148,7 +164,7 @@ export default function Buy() {
 
         {errorMsg && (
           <div className="text-red-700 bg-red-100 p-3 rounded text-center">
-            ❌ {errorMsg}
+            {errorMsg}
           </div>
         )}
 
@@ -156,7 +172,7 @@ export default function Buy() {
         <div className="text-sm text-center text-gray-700 mb-2">
           Live Price:{" "}
           <span className="font-semibold text-green-600">
-            {livePrice != null ? `₹${livePrice.toFixed(2)}` : "--"}
+            {livePrice != null ? `₹${livePrice.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : "--"}
           </span>
         </div>
 
@@ -249,7 +265,7 @@ export default function Buy() {
           </button>
         </div>
 
-        {/* Optional SL/Target (kept in state for future use) */}
+        {/* Optional SL/Target */}
         <input
           type="number"
           value={stoploss}
@@ -268,9 +284,12 @@ export default function Buy() {
 
       <button
         onClick={handleSubmit}
-        className="mt-6 w-full py-3 bg-green-600 text-white text-lg font-semibold rounded-lg"
+        disabled={submitting}
+        className={`mt-6 w-full py-3 text-white text-lg font-semibold rounded-lg ${
+          submitting ? "bg-green-400 cursor-not-allowed" : "bg-green-600 hover:bg-green-700"
+        }`}
       >
-        BUY
+        {submitting ? "Placing…" : "BUY"}
       </button>
 
       {/* Success Modal */}
@@ -281,7 +300,7 @@ export default function Buy() {
               <div className="animate-bounce text-green-600 text-6xl">✅</div>
             </div>
             <p className="text-lg font-semibold text-green-700">
-              {successText || "Order is successfully placed."}
+              {successText || "Order is placed"}
             </p>
           </div>
         </div>
