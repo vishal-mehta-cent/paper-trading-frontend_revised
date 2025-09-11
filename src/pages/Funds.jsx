@@ -1,126 +1,186 @@
+// frontend/src/pages/Funds.jsx
 import React, { useEffect, useState } from "react";
 import BackButton from "../components/BackButton";
 
-export default function Funds({ username }) {
-  const [totalFunds, setTotalFunds] = useState(0);
-  const [availableFunds, setAvailableFunds] = useState(0);
-  const [newAmount, setNewAmount] = useState("");
-  const [message, setMessage] = useState("");
-  const [loading, setLoading] = useState(false);
+const API = "http://localhost:8000";
 
-  // ✅ Fetch funds
-  const fetchFunds = () => {
-  if (!username) return;
-
-  setLoading(true);
-  setMessage(""); // Clear message initially
-
-  fetch(`http://127.0.0.1:8000/funds/available/${encodeURIComponent(username)}`)
-    .then((res) => {
-      if (!res.ok) {
-        if (res.status === 404) {
-          // New user, no fund record yet – not an error
-          setTotalFunds(0);
-          setAvailableFunds(0);
-          return null;
-        }
-        throw new Error("Server error");
-      }
-      return res.json();
-    })
-    .then((data) => {
-      if (data) {
-        setTotalFunds(data.total_funds || 0);
-        setAvailableFunds(data.available_funds || 0);
-      }
-    })
-    .catch((err) => {
-      console.error("Error loading funds:", err);
-      setMessage("❌ Failed to load fund details");
-    })
-    .finally(() => setLoading(false));
+// helpers
+const formatINR = (v, decimals = 0) => {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return n.toLocaleString("en-IN", {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
+  });
 };
+
+// Strip commas safely
+const uncomma = (s) => (s || "").toString().replace(/,/g, "");
+
+export default function Funds({ username }) {
+  const [total, setTotal] = useState(0);
+  const [available, setAvailable] = useState(0);
+  const [amountInput, setAmountInput] = useState(""); // text so we can allow commas & decimals
+  const [loading, setLoading] = useState(true);
+  const [err, setErr] = useState("");
+  const [ok, setOk] = useState("");
 
   useEffect(() => {
-    fetchFunds();
+    if (!username) return;
+    reload();
   }, [username]);
 
-  const handleUpdate = async () => {
-  const amount = parseFloat(newAmount);
+  const reload = () => {
+    setLoading(true);
+    setErr("");
+    setOk("");
+    fetch(`${API}/funds/available/${username}`)
+      .then((r) => {
+        if (!r.ok) throw new Error("Failed to fetch funds");
+        return r.json();
+      })
+      .then((d) => {
+        setTotal(Number(d.total_funds || 0));
+        setAvailable(Number(d.available_funds || 0));
+      })
+      .catch((e) => setErr(e.message || "Server error"))
+      .finally(() => setLoading(false));
+  };
 
-  if (!newAmount || isNaN(amount) || amount <= 0) {
-    setMessage("❌ Please enter a valid positive number");
-    return;
-  }
+  // Allow only digits and one dot (up to 2 decimals)
+  const handleAmountChange = (e) => {
+    const raw = e.target.value;
+    // Permit commas while typing (we'll strip), and allow up to 2 decimals
+    const cleaned = uncomma(raw);
+    if (/^\d*\.?\d{0,2}$/.test(cleaned) || cleaned === "") {
+      setAmountInput(raw);
+    }
+  };
 
-  setMessage("Updating funds...");
+  // On blur, format with commas (keep up to 2 decimals)
+  const handleAmountBlur = () => {
+    const cleaned = uncomma(amountInput);
+    if (cleaned === "") return;
+    const n = Number(cleaned);
+    if (Number.isFinite(n)) {
+      setAmountInput(n.toLocaleString("en-IN", { maximumFractionDigits: 2, minimumFractionDigits: 0 }));
+    }
+  };
 
-  try {
-    const res = await fetch(`http://127.0.0.1:8000/funds/${encodeURIComponent(username)}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ amount }),  // ✅ No username, just amount
-    });
+  // On focus, remove commas so user can edit easily
+  const handleAmountFocus = () => {
+    setAmountInput(uncomma(amountInput));
+  };
 
-    if (!res.ok) throw new Error("Failed to update funds");
+  const addFunds = async () => {
+    setErr("");
+    setOk("");
+    const n = Number(uncomma(amountInput));
+    if (!Number.isFinite(n) || n <= 0) {
+      setErr("Enter a valid amount.");
+      return;
+    }
+    try {
+      const res = await fetch(`${API}/funds/add`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, amount: n }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.detail || "Add funds failed");
+      setOk("Funds added successfully.");
+      setAmountInput("");
+      reload();
+    } catch (e) {
+      setErr(e.message || "Server error");
+    }
+  };
 
-    await res.json();
-    fetchFunds();
-    setNewAmount("");
-    setMessage("✅ Funds updated successfully");
-  } catch (err) {
-    console.error("Update error:", err);
-    setMessage("❌ Something went wrong while updating funds");
-  }
-};
-
+  const withdrawFunds = async () => {
+    setErr("");
+    setOk("");
+    const n = Number(uncomma(amountInput));
+    if (!Number.isFinite(n) || n <= 0) {
+      setErr("Enter a valid amount.");
+      return;
+    }
+    try {
+      const res = await fetch(`${API}/funds/withdraw`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, amount: n }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.detail || "Withdraw failed");
+      setOk("Funds withdrawn successfully.");
+      setAmountInput("");
+      reload();
+    } catch (e) {
+      setErr(e.message || "Server error");
+    }
+  };
 
   return (
-    <div className="min-h-screen p-6 bg-white">
+    <div className="min-h-screen bg-gray-100 p-4 md:max-w-xl md:mx-auto">
       <BackButton to="/profile" />
-      <h2 className="text-xl font-bold text-blue-600 text-center mb-4">💰 Manage Funds</h2>
+      <h2 className="text-2xl font-bold text-center mb-4">Funds</h2>
 
-      {message && (
-        <div
-          className={`text-center mb-4 font-medium p-2 rounded ${
-            message.startsWith("✅")
-              ? "bg-green-100 text-green-700"
-              : message.startsWith("Updating")
-              ? "bg-yellow-100 text-yellow-700"
-              : "bg-red-100 text-red-700"
-          }`}
-        >
-          {message}
-        </div>
+      {loading ? (
+        <div className="text-center text-gray-500">Loading…</div>
+      ) : (
+        <>
+          <div className="bg-white rounded-xl shadow p-4 mb-4 grid grid-cols-2 gap-3">
+            <div className="text-center">
+              <div className="text-xs text-gray-500">Total Funds</div>
+              <div className="text-xl font-semibold">
+                ₹{formatINR(total, 0)}
+              </div>
+            </div>
+            <div className="text-center">
+              <div className="text-xs text-gray-500">Available Funds</div>
+              <div className="text-xl font-semibold">
+                ₹{formatINR(available, 0)}
+              </div>
+            </div>
+          </div>
+
+          {err && (
+            <div className="bg-red-100 text-red-700 p-3 rounded mb-3 text-center">
+              {err}
+            </div>
+          )}
+          {ok && (
+            <div className="bg-green-100 text-green-700 p-3 rounded mb-3 text-center">
+              {ok}
+            </div>
+          )}
+
+          <div className="bg-white rounded-xl shadow p-4">
+            <label className="block text-sm text-gray-600 mb-1">
+              Amount (₹)
+            </label>
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="e.g. 1,000.50"
+              value={amountInput}
+              onChange={handleAmountChange}
+              onBlur={handleAmountBlur}
+              onFocus={handleAmountFocus}
+              className="w-full px-4 py-3 border rounded-lg"
+            />
+
+            <div className="flex justify-center w-full">
+              <button
+                onClick={addFunds}
+                className="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700"
+              >
+                Add Funds
+              </button>
+            </div>
+          </div>
+        </>
       )}
-
-      <div className="bg-blue-50 p-4 rounded shadow text-center mb-6 border border-blue-100">
-        <p className="text-gray-600 text-sm">Total Funds</p>
-        <p className="text-xl font-bold text-blue-800 mb-2">
-          ₹{totalFunds.toFixed(2)}
-        </p>
-        <p className="text-gray-600 text-sm">Available Funds</p>
-        <p className="text-xl font-semibold text-green-600">
-          ₹{availableFunds.toFixed(2)}
-        </p>
-      </div>
-
-      <div className="max-w-md mx-auto space-y-4">
-        <input
-          type="number"
-          min="0"
-          value={newAmount}
-          onChange={(e) => setNewAmount(e.target.value)}
-          className="w-full border px-4 py-2 rounded text-lg"
-          placeholder="Enter Amount To Add"
-        />
-        <button
-          onClick={handleUpdate}
-          className="w-full bg-blue-600 text-white py-2 rounded font-semibold hover:bg-blue-700"
-        >
-          {loading ? "Please wait..." : "Add Funds"}
-        </button>
-      </div>
     </div>
   );
 }

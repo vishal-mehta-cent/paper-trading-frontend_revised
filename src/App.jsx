@@ -6,8 +6,12 @@ import {
   Route,
   Navigate,
   useLocation,
+  useNavigate,
 } from "react-router-dom";
+import { createPortal } from "react-dom";
 import { AnimatePresence } from "framer-motion";
+import { ToastContainer } from "react-toastify";
+import "react-toastify/dist/ReactToastify.css";
 
 // Pages
 import LoginRegister from "./pages/LoginRegister";
@@ -30,11 +34,48 @@ import Notes from "./pages/Notes";
 import Settings from "./pages/Settings";
 import PasswordChange from "./pages/PasswordChange";
 import EmailChange from "./pages/EmailChange";
-import Funds from "./pages/Funds";       // Funds management
-import History from "./pages/History";   // Buy/Sell activity
+import Funds from "./pages/Funds";
+import History from "./pages/History";
+import ModifyOrderPage from "./pages/ModifyOrderPage";
+import ProfileDetail from "./pages/ProfileDetail";
 
-import { ToastContainer } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
+
+/** Fixed logo shown on every non-auth page (rendered to body via portal) */
+function RouteAwareTopRightLogo() {
+  const { pathname } = useLocation();
+  const hide =
+    pathname === "/" ||
+    pathname === "/loginregister" ||
+    pathname.startsWith("/auth");
+
+  if (hide) return null;
+
+  // Render on top of everything to avoid being hidden by page headers
+  return createPortal(
+    <div className="fixed top-1 right-3 z-[99999] pointer-events-none">
+      <a href="/menu" aria-label="Home" className="pointer-events-auto">
+        <img
+          src="/logo1.png" // ensure this file is in /public
+          alt="App Logo"
+          className="h-10 w-auto md:h-12 drop-shadow-lg select-none"
+          draggable={false}
+        />
+      </a>
+    </div>,
+    document.body
+  );
+}
+
+/** Auth screen with centered branding above the login/register UI */
+function AuthScreen({ onLoginSuccess }) {
+  return (
+        <div className="flex-1 flex items-start justify-center px-4 pb-8">
+        <div className="w-full max-w-md">
+          <LoginRegister onLoginSuccess={onLoginSuccess} />
+        </div>
+      </div>
+  );
+}
 
 export default function App() {
   const [username, setUsername] = useState(() =>
@@ -48,7 +89,6 @@ export default function App() {
 
   const handleLoginSuccess = (user) => {
     setUsername(user);
-    // Redirect to menu after login/register
     window.location.href = "/menu";
   };
 
@@ -56,8 +96,12 @@ export default function App() {
 
   return (
     <BrowserRouter>
-      {/* Global toast host */}
+      {/* Top-right logo for all non-auth routes */}
+      <RouteAwareTopRightLogo />
+
+      {/* Toasts */}
       <ToastContainer position="top-center" autoClose={2000} />
+
       <AnimatedRoutes
         username={username}
         onLoginSuccess={handleLoginSuccess}
@@ -69,23 +113,34 @@ export default function App() {
 
 function AnimatedRoutes({ username, onLoginSuccess, onLogout }) {
   const location = useLocation();
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    function onOpenDetails(e) {
+      const symbol = e?.detail?.symbol;
+      if (!symbol) return;
+      navigate(`/trade/${encodeURIComponent(symbol)}`);
+    }
+    window.addEventListener("open-script-details", onOpenDetails);
+    return () =>
+      window.removeEventListener("open-script-details", onOpenDetails);
+  }, [navigate]);
 
   return (
     <AnimatePresence mode="wait" initial={false}>
       <Routes location={location} key={location.pathname}>
-        {/* Login / Landing */}
+        {/* Auth route: branding + login/register */}
         <Route
           path="/"
           element={
             username ? (
               <Navigate to="/menu" replace />
             ) : (
-              <LoginRegister onLoginSuccess={onLoginSuccess} />
+              <AuthScreen onLoginSuccess={onLoginSuccess} />
             )
           }
         />
 
-        {/* Main Menu */}
         <Route
           path="/menu"
           element={
@@ -93,15 +148,10 @@ function AnimatedRoutes({ username, onLoginSuccess, onLogout }) {
           }
         />
 
-        {/* Trade & Watchlist */}
         <Route
           path="/trade"
           element={
-            username ? (
-              <Trade username={username} />
-            ) : (
-              <Navigate to="/" replace />
-            )
+            username ? <Trade username={username} /> : <Navigate to="/" replace />
           }
         />
         <Route
@@ -115,15 +165,10 @@ function AnimatedRoutes({ username, onLoginSuccess, onLogout }) {
           }
         />
 
-        {/* Orders */}
         <Route
           path="/orders"
           element={
-            username ? (
-              <Orders username={username} />
-            ) : (
-              <Navigate to="/" replace />
-            )
+            username ? <Orders username={username} /> : <Navigate to="/" replace />
           }
         />
         <Route
@@ -136,12 +181,9 @@ function AnimatedRoutes({ username, onLoginSuccess, onLogout }) {
         />
         <Route
           path="/trade-success"
-          element={
-            username ? <TradeSuccess /> : <Navigate to="/" replace />
-          }
+          element={username ? <TradeSuccess /> : <Navigate to="/" replace />}
         />
 
-        {/* Charting & Tools */}
         <Route
           path="/chart/:symbol"
           element={username ? <ChartPage /> : <Navigate to="/" replace />}
@@ -155,7 +197,6 @@ function AnimatedRoutes({ username, onLoginSuccess, onLogout }) {
           element={username ? <Notes /> : <Navigate to="/" replace />}
         />
 
-        {/* Dashboard Sections */}
         <Route
           path="/portfolio"
           element={
@@ -168,10 +209,7 @@ function AnimatedRoutes({ username, onLoginSuccess, onLogout }) {
         />
         <Route
           path="/recommendations"
-          element={
-            username ? <Recommendation /> : <Navigate to="/" replace />
-          }
-        />
+          element={username ? <Recommendation /> : <Navigate to="/" replace />} />
         <Route
           path="/insight"
           element={username ? <Insight /> : <Navigate to="/" replace />}
@@ -181,13 +219,11 @@ function AnimatedRoutes({ username, onLoginSuccess, onLogout }) {
           element={username ? <IpoTracker /> : <Navigate to="/" replace />}
         />
 
-        {/* Feedback (uses localStorage username per your original code) */}
         <Route
           path="/feedback"
           element={<Feedback username={localStorage.getItem("username")} />}
         />
 
-        {/* Profile & Settings */}
         <Route
           path="/profile"
           element={
@@ -208,6 +244,7 @@ function AnimatedRoutes({ username, onLoginSuccess, onLogout }) {
             username ? <History username={username} /> : <Navigate to="/" replace />
           }
         />
+
         <Route
           path="/settings"
           element={username ? <Settings /> : <Navigate to="/" replace />}
@@ -216,10 +253,18 @@ function AnimatedRoutes({ username, onLoginSuccess, onLogout }) {
           path="/settings/change-password"
           element={username ? <PasswordChange /> : <Navigate to="/" replace />}
         />
+        <Route 
+          path="/profile/details" 
+          element={<ProfileDetail />} 
+        />
+
         <Route
           path="/settings/change-email"
           element={username ? <EmailChange /> : <Navigate to="/" replace />}
         />
+
+        {/* Keep specific route before wildcard */}
+        <Route path="/modify/:id" element={<ModifyOrderPage />} />
 
         {/* Catch-all */}
         <Route path="*" element={<Navigate to="/" replace />} />

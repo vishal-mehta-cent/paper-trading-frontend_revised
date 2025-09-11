@@ -1,4 +1,4 @@
-// ✅ ScriptDetail.jsx - Instant Live Data + Day's Range Slider + TradeModal Popup
+// ✅ ScriptDetail.jsx - SELL pre-check with robust fallback + clear logs
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { motion } from "framer-motion";
@@ -25,36 +25,53 @@ ChartJS.register(
   Tooltip
 );
 
+const API = "http://127.0.0.1:8000";
+
+const getUsername = (propUser) => propUser || localStorage.getItem("username") || "";
+
 export default function ScriptDetail({ username }) {
   const { symbol } = useParams();
   const location = useLocation();
   const nav = useNavigate();
 
-  // ✅ State from navigation for instant load
   const [quote, setQuote] = useState(
     location.state
       ? {
-          price: location.state.livePrice ?? null,
-          change: location.state.change ?? null,
-          pct_change: location.state.changePercent ?? null,
-          open: location.state.open ?? null,
+          price: location.state.livePrice || 0,
+          change: location.state.change || 0,
+          pct_change: location.state.changePercent || 0,
+          open: location.state.open || 0,
           exchange: location.state.exchange || "NSE",
+          dayHigh: location.state.dayHigh || null,
+          dayLow: location.state.dayLow || null,
         }
       : null
   );
   const [hist, setHist] = useState([]);
   const [qty, setQty] = useState(1);
   const [buyPrice, setBuyPrice] = useState("");
+
+  // BUY modal (unchanged)
   const [showTradeModal, setShowTradeModal] = useState(false);
   const [tradeType, setTradeType] = useState("BUY");
 
-  // ✅ Live polling for fresh quote
+  // Market-close confirm (BUY)
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [pendingAction, setPendingAction] = useState(null);
+
+  // 👉 Short/No-ownership confirm
+  const [showShortConfirm, setShowShortConfirm] = useState(false);
+  const [shortConfirmMsg, setShortConfirmMsg] = useState("");
+  const [previewData, setPreviewData] = useState(null);
+  const [checkingSell, setCheckingSell] = useState(false);
+
+  // ---- live quote poll
   useEffect(() => {
     const fetchQuote = () => {
-      fetch(`http://127.0.0.1:8000/quotes?symbols=${symbol}`)
+      fetch(`${API}/quotes?symbols=${symbol}`)
         .then((r) => r.json())
         .then((arr) => {
-          if (arr && arr[0]) setQuote(arr[0]);
+          if (arr[0]) setQuote((prev) => ({ ...prev, ...arr[0] }));
         })
         .catch((err) => console.error("Quote fetch error:", err));
     };
@@ -63,9 +80,9 @@ export default function ScriptDetail({ username }) {
     return () => clearInterval(id);
   }, [symbol]);
 
-  // ✅ Fetch historical data
+  // ---- historical
   useEffect(() => {
-    fetch(`http://127.0.0.1:8000/historical?symbol=${symbol}&period=1mo`)
+    fetch(`${API}/historical?symbol=${symbol}&period=1mo`)
       .then((r) => r.json())
       .then(setHist)
       .catch((err) => console.error("Hist fetch error:", err));
@@ -85,14 +102,110 @@ export default function ScriptDetail({ username }) {
     );
   }
 
-  // Chart data
-  const data = {
+  const isMarketClosed = () => {
+    const now = new Date();
+    const hrs = now.getHours();
+    const mins = now.getMinutes();
+    return hrs > 15 || (hrs === 15 && mins >= 45);
+  };
+
+  // ---- BUY (unchanged)
+  function handleBuyClick() {
+    if (isMarketClosed()) {
+      setPendingAction("BUY");
+      setShowConfirm(true);
+    } else {
+      setTradeType("BUY");
+      setShowTradeModal(true);
+    }
+  }
+
+  // ---- SELL with robust pre-check + logs
+  async function handleSellClick() {
+    const u = getUsername(username);
+    if (!u) {
+      alert("Not logged in.");
+      return;
+    }
+
+    try {
+      setCheckingSell(true);
+
+      const body = {
+        username: u,
+        script: symbol.toUpperCase(),
+        order_type: "SELL",
+        qty: Number(qty) || 1,
+        segment: "intraday",      // change if you let user pick
+        allow_short: false,       // we only ask; don't auto-short
+      };
+
+      console.log("[SELL preview] POST", `${API}/orders/sell/preview`, body);
+      const res = await fetch(`${API}/orders/sell/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      console.log("[SELL preview] status:", res.status, "payload:", data);
+
+      // If the server explicitly asks for confirmation (409 in other flows) or flags needs_confirmation
+      const needsConfirm =
+        data?.needs_confirmation === true ||
+        data?.code === "NEEDS_CONFIRM_SHORT" ||
+        res.status === 409;
+
+      // If API responded OK but says owned_qty==0 → force the confirm
+      const ownedZero = Number(data?.owned_qty || 0) === 0;
+
+      if (res.ok) {
+        if (!ownedZero) {
+          // You own something → go sell directly
+          nav(`/sell/${symbol}`, {
+            state: {
+              requestedQty: Number(qty) || 1,
+              allow_short: false,
+              preview: data,
+            },
+          });
+          return;
+        }
+        // owned 0 → show confirm
+        setPreviewData(data);
+        setShortConfirmMsg(
+          data?.message || `You have 0 qty of ${symbol}. Do you still want to sell first?`
+        );
+        setShowShortConfirm(true);
+        return;
+      }
+
+      // Not ok:
+      if (needsConfirm || ownedZero) {
+        setPreviewData(data);
+        setShortConfirmMsg(
+          data?.message || `You have 0 qty of ${symbol}. Do you still want to sell first?`
+        );
+        setShowShortConfirm(true);
+        return;
+      }
+
+      const detail = data?.detail || data?.message || "Sell preview failed";
+      alert(typeof detail === "string" ? detail : "Sell preview failed.");
+    } catch (err) {
+      console.error("SELL preview error:", err);
+      alert("Unable to check holdings right now. Please try again.");
+    } finally {
+      setCheckingSell(false);
+    }
+  }
+
+  const dataLine = {
     labels: hist.map((d) => new Date(d.date)),
     datasets: [
       {
         label: `${symbol} Close`,
         data: hist.map((d) => d.close),
-        borderColor: "#3b82f6",
         fill: false,
         tension: 0.2,
       },
@@ -107,15 +220,15 @@ export default function ScriptDetail({ username }) {
     plugins: { tooltip: { mode: "index", intersect: false } },
   };
 
-  // ✅ Day’s range slider pointer
-  const open = quote.open ?? 0;
-  const current = quote.price ?? 0;
+  const current = quote.price || 0;
+  const dayHigh = quote.dayHigh || current;
+  const dayLow = quote.dayLow || current;
   const buy = parseFloat(buyPrice) || 0;
+
   const pointerPos =
-    open && current ? ((buy - open) / (current - open)) * 100 : 0;
-  const pointerStyle = {
-    left: `${Math.min(100, Math.max(0, pointerPos))}%`,
-  };
+    dayHigh !== dayLow ? ((buy - dayLow) / (dayHigh - dayLow)) * 100 : 0;
+
+  const pointerStyle = { left: `${Math.min(100, Math.max(0, pointerPos))}%` };
 
   return (
     <>
@@ -126,31 +239,20 @@ export default function ScriptDetail({ username }) {
         transition={{ type: "spring", stiffness: 300 }}
         className="fixed inset-0 bg-white overflow-auto p-4"
       >
-        {/* Header */}
         <div className="text-center mb-4">
           <h1 className="text-2xl font-serif">{symbol}</h1>
           <p className="text-sm text-gray-500">{quote.exchange}</p>
         </div>
 
-        {/* Price & Change */}
         <div className="flex items-baseline justify-center space-x-4 mb-6">
-          <span className="text-4xl font-bold">
-            {quote.price != null ? quote.price.toLocaleString() : "--"}
-          </span>
-          <span
-            className={quote.change >= 0 ? "text-green-600" : "text-red-600"}
-          >
-            {quote.change != null
-              ? `${quote.change >= 0 ? "+" : ""}${quote.change.toFixed(
-                  2
-                )} (${quote.pct_change >= 0 ? "+" : ""}${quote.pct_change?.toFixed(
-                  2
-                )}%)`
-              : "--"}
+          <span className="text-4xl font-bold">{quote.price?.toLocaleString()}</span>
+          <span className={quote.change >= 0 ? "text-green-600" : "text-red-600"}>
+            {quote.change >= 0 ? "+" : ""}
+            {quote.change?.toFixed(2)} ({quote.pct_change?.toFixed(2)}%)
           </span>
         </div>
 
-        {/* Qty & Price inputs */}
+        {/* Qty & Buttons */}
         <div className="flex flex-col items-center space-y-3 mb-6">
           <input
             type="number"
@@ -169,27 +271,21 @@ export default function ScriptDetail({ username }) {
           />
           <div className="flex space-x-4">
             <button
-              onClick={() => {
-                setTradeType("BUY");
-                setShowTradeModal(true);
-              }}
+              onClick={handleBuyClick}
               className="bg-blue-600 text-white px-6 py-2 rounded hover:bg-blue-700"
             >
               BUY
             </button>
             <button
-              onClick={() => {
-                setTradeType("SELL");
-                setShowTradeModal(true);
-              }}
-              className="bg-red-600 text-white px-6 py-2 rounded hover:bg-red-700"
+              disabled={checkingSell}
+              onClick={handleSellClick}
+              className={`${checkingSell ? "opacity-70 cursor-wait" : ""} bg-red-600 text-white px-6 py-2 rounded hover:bg-red-700`}
             >
-              SELL
+              {checkingSell ? "Checking…" : "SELL"}
             </button>
           </div>
         </div>
 
-        {/* Chart link */}
         <div
           className="flex justify-center items-center mb-6 text-gray-800 cursor-pointer space-x-1"
           onClick={() => nav(`/chart/${symbol}`)}
@@ -198,20 +294,19 @@ export default function ScriptDetail({ username }) {
           <ArrowRight size={16} />
         </div>
 
-        {/* Chart */}
         <div className="mb-8">
-          <Line data={data} options={options} />
+          <Line data={dataLine} options={options} />
         </div>
 
-        {/* Day’s Range */}
         <div className="mb-10">
-          <p className="font-medium text-center mb-2">Day’s Range</p>
+          <p className="font-medium text-center mb-2">Day Range</p>
           <div className="flex justify-between text-xs text-gray-500 px-4 mb-1">
-            <span>₹{open ? open.toFixed(2) : "--"}</span>
-            <span>₹{current ? current.toFixed(2) : "--"}</span>
+            <span>
+              ₹{quote.dayLow} - ₹ {quote.dayHigh}
+            </span>
           </div>
           <div className="relative h-1 bg-gray-300 mx-4 rounded">
-            <div className="absolute top-0 h-1 bg-blue-500 rounded w-full" />
+            <div className="absolute top-0 h-1 bg-blue-500 rounded" style={{ width: "100%" }} />
             <div
               className="absolute top-[-6px] w-0 h-0 border-l-4 border-r-4 border-b-8 border-transparent border-b-gray-500"
               style={pointerStyle}
@@ -222,7 +317,6 @@ export default function ScriptDetail({ username }) {
           </p>
         </div>
 
-        {/* Alert & Notes */}
         <div className="flex justify-around mb-10">
           <button
             onClick={() => nav(`/alert/${symbol}`)}
@@ -241,15 +335,81 @@ export default function ScriptDetail({ username }) {
         </div>
       </motion.div>
 
-      {/* Trade Modal */}
+      {/* BUY Trade Modal */}
       {showTradeModal && (
         <TradeModal
           symbol={symbol}
           type={tradeType}
-          qty={qty}
-          price={buyPrice}
           onClose={() => setShowTradeModal(false)}
         />
+      )}
+
+      {/* Market closed confirm (BUY) */}
+      {showConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg text-center">
+            <p className="mb-4 text-gray-800 font-semibold">
+              Market is closed. Do you still want to {pendingAction}?
+            </p>
+            <div className="flex justify-center gap-4">
+              <button
+                className="bg-gray-400 text-white px-4 py-2 rounded"
+                onClick={() => {
+                  setShowConfirm(false);
+                  setPendingAction(null);
+                }}
+              >
+                NO
+              </button>
+              <button
+                className="bg-blue-600 text-white px-4 py-2 rounded"
+                onClick={() => {
+                  setShowConfirm(false);
+                  if (pendingAction === "BUY") {
+                    setTradeType("BUY");
+                    setShowTradeModal(true);
+                  }
+                }}
+              >
+                YES
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 👉 No-ownership / short-sell confirm */}
+      {showShortConfirm && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-lg text-center max-w-sm">
+            <p className="mb-4 text-gray-800 font-semibold">
+              {shortConfirmMsg || `You have 0 qty of ${symbol}. Do you still want to sell first?`}
+            </p>
+            <div className="flex justify-center gap-4">
+              <button
+                className="bg-gray-400 text-white px-4 py-2 rounded"
+                onClick={() => setShowShortConfirm(false)}
+              >
+                NO
+              </button>
+              <button
+                className="bg-red-600 text-white px-4 py-2 rounded"
+                onClick={() => {
+                  setShowShortConfirm(false);
+                  nav(`/sell/${symbol}`, {
+                    state: {
+                      requestedQty: Number(qty) || 1,
+                      allow_short: true,   // user agreed to sell-first
+                      preview: previewData,
+                    },
+                  });
+                }}
+              >
+                YES
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   );

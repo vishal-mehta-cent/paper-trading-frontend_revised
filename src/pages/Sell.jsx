@@ -1,37 +1,58 @@
 // frontend/src/pages/Sell.jsx
-import React, { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import React, { useState, useEffect, useRef } from "react";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import BackButton from "../components/BackButton";
 
-const API = "http://localhost:8000";
+const API = "http://localhost:8000"; // backend API base
 
 export default function Sell() {
   const { symbol } = useParams();
   const nav = useNavigate();
+  const location = useLocation();
+  const prefill = location.state || {};
 
-  const [qty, setQty] = useState("");
-  const [price, setPrice] = useState("");
-  const [exchange, setExchange] = useState("NSE");
-  const [segment, setSegment] = useState("intraday");
-  const [stoploss, setStoploss] = useState("");
-  const [target, setTarget] = useState("");
+  // Mode flags
+  const isModify = Boolean(prefill.modifyId || prefill.fromModify);
+  const isAdd = Boolean(prefill.fromAdd);
 
-  const [orderMode, setOrderMode] = useState("MARKET"); // MARKET or LIMIT
-  const [livePrice, setLivePrice] = useState(null);
-  const [availableQty, setAvailableQty] = useState(null);
+  // Prefill inputs if passed
+  const [qty, setQty] = useState(prefill.qty || "");
+  const [price, setPrice] = useState(prefill.price || "");
+  const [exchange, setExchange] = useState(prefill.exchange || "NSE");
+  const [segment, setSegment] = useState(prefill.segment || "intraday");
+  const [stoploss, setStoploss] = useState(prefill.stoploss || "");
+  const [target, setTarget] = useState(prefill.target || "");
 
   const [errorMsg, setErrorMsg] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-
   const [successModal, setSuccessModal] = useState(false);
   const [successText, setSuccessText] = useState("");
+  const [livePrice, setLivePrice] = useState(null);
+
+  const [orderMode, setOrderMode] = useState(prefill.orderMode || "MARKET");
+  const [submitting, setSubmitting] = useState(false);
 
   const username = localStorage.getItem("username");
+  const userEditedPrice = useRef(false);
 
-  // -------- Live price (immediate + polling) --------
+  // -------- Check market time on mount --------
+  useEffect(() => {
+    const now = new Date();
+    const cutoff = new Date();
+    cutoff.setHours(15, 45, 0, 0); // 3:45 PM
+
+    if (now > cutoff && !isModify && !isAdd) {
+      const confirmProceed = window.confirm(
+        "⚠️ Market is closed. Do you still want to place a SELL order?"
+      );
+      if (!confirmProceed) {
+        nav(`/script/${symbol}`); // back to script detail page
+      }
+    }
+  }, [nav, symbol, isModify, isAdd]);
+
+  // -------- Live price polling --------
   useEffect(() => {
     if (!symbol) return;
-
     let cancelled = false;
 
     const fetchLive = async () => {
@@ -42,17 +63,15 @@ export default function Sell() {
           const live = Number(data[0].price);
           if (Number.isFinite(live)) {
             setLivePrice(live);
-            if (orderMode === "LIMIT" && !price) {
+
+            if (orderMode === "LIMIT" && !price && !userEditedPrice.current) {
               setPrice(live.toFixed(2));
             }
           }
         }
-      } catch {
-        /* ignore */
-      }
+      } catch {}
     };
 
-    // fetch immediately, then poll
     fetchLive();
     const id = setInterval(fetchLive, 3000);
     return () => {
@@ -62,44 +81,7 @@ export default function Sell() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [symbol, orderMode]);
 
-  // -------- Get available qty for this symbol (optional helper UI) --------
-  useEffect(() => {
-    if (!username || !symbol) return;
-    let cancelled = false;
-
-    const fetchPositions = async () => {
-      try {
-        const res = await fetch(`${API}/orders/positions/${username}`);
-        const arr = await res.json();
-        if (cancelled || !Array.isArray(arr)) return;
-        const forSym = arr.find(
-          (p) => (p.symbol || p.script) === symbol && (p.type || p.order_type) !== "SELL"
-        );
-        const qtyNum = Number(forSym?.qty);
-        setAvailableQty(Number.isFinite(qtyNum) ? qtyNum : 0);
-      } catch {
-        setAvailableQty(null);
-      }
-    };
-
-    fetchPositions();
-    // refresh every ~10s
-    const id = setInterval(fetchPositions, 10000);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [username, symbol]);
-
-  const playSuccessSound = () => {
-    try {
-      const audio = new Audio("/success.mp3");
-      audio.play();
-    } catch {
-      /* ignore */
-    }
-  };
-
+  // -------- Submit --------
   const handleSubmit = async () => {
     if (submitting) return;
     setSubmitting(true);
@@ -107,17 +89,12 @@ export default function Sell() {
     setSuccessText("");
 
     try {
-      if (!username) throw new Error("❌ Please login again (username missing).");
+      if (!username) throw new Error("❌ Please login again.");
       if (!symbol) throw new Error("❌ Invalid symbol.");
 
       const qtyNum = Number(qty);
       if (!Number.isFinite(qtyNum) || qtyNum <= 0) {
         throw new Error("❌ Please enter a valid quantity (> 0).");
-      }
-
-      // Optional UI-side warning (backend still enforces position check)
-      if (availableQty != null && qtyNum > availableQty) {
-        throw new Error(`❌ Not enough quantity to sell. Available: ${availableQty}`);
       }
 
       const payload = {
@@ -127,6 +104,10 @@ export default function Sell() {
         qty: qtyNum,
         exchange,
         segment,
+        price: orderMode === "LIMIT" ? Number(price) : null,
+        stoploss: stoploss !== "" ? Number(stoploss) : null,
+        target: target !== "" ? Number(target) : null,
+        allow_short: true,          // ✅ allow SELL FIRST
       };
 
       if (orderMode === "LIMIT") {
@@ -135,40 +116,57 @@ export default function Sell() {
           throw new Error("❌ Please enter a valid limit price.");
         }
         payload.price = px;
+      }
+
+      let res, data;
+
+      if (isAdd) {
+        res = await fetch(`${API}/orders/add`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+      } else if (isModify) {
+        res = await fetch(`${API}/orders/${prefill.modifyId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
       } else {
-        payload.price = null; // MARKET; backend will use live
+        res = await fetch(`${API}/orders`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
       }
 
-      const res = await fetch(`${API}/orders`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-
-      const data = await res.json().catch(() => ({}));
+      data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        throw new Error(data?.detail || "Order failed");
+        const det = data?.detail;
+        const msg =
+        typeof det === "string"
+          ? det
+          : det?.message || (det ? JSON.stringify(det) : "Order failed");
+        throw new Error(msg);
       }
 
-      // Determine message
-      // Executed instantly (triggered) => "Sell successfully"
-      // Else goes to open orders => "Order is placed"
-      const triggered =
-        data.triggered === true ||
-        String(data?.message || "").toUpperCase() === "EXECUTED" ||
-        String(data?.status || "").toLowerCase() === "filled";
+            if (isAdd) {
+              setSuccessText("Added to Position ✅");
+            } else if (isModify) {
+              setSuccessText("Modify Successful ✅");
+            } else {
+              setSuccessText("Sell Successful ✅");
+            }
 
-      setSuccessText(triggered ? "Sell successfully" : "Order is placed");
-      playSuccessSound();
       setSuccessModal(true);
-
-      // reset a bit
-      setQty("");
-      if (orderMode === "LIMIT") setPrice("");
 
       setTimeout(() => {
         setSuccessModal(false);
-        nav("/orders");
+        if (data.triggered) {
+          nav("/orders", { state: { refresh: true, tab: "positions" } });
+        } else {
+          nav("/orders", { state: { refresh: true, tab: "open" } });
+        }
       }, 1500);
     } catch (e) {
       setErrorMsg(e.message || "Server error");
@@ -179,11 +177,14 @@ export default function Sell() {
 
   return (
     <div className="min-h-screen bg-gray-100 p-4 md:max-w-xl md:mx-auto flex flex-col justify-between">
-      <BackButton to="/trade" />
-
+      <BackButton to="/orders" />
       <div className="space-y-5">
         <h2 className="text-2xl font-bold text-center text-red-600">
-          SELL {symbol}
+          {isAdd
+            ? `ADD TO ${symbol}`
+            : isModify
+            ? "MODIFY ORDER"
+            : `SELL ${symbol}`}
         </h2>
 
         {errorMsg && (
@@ -192,25 +193,13 @@ export default function Sell() {
           </div>
         )}
 
-        {/* Live Price */}
-        <div className="text-sm text-center text-gray-700">
+        <div className="text-sm text-center text-gray-700 mb-2">
           Live Price:{" "}
           <span className="font-semibold text-red-600">
-            {livePrice != null
-              ? `₹${livePrice.toLocaleString("en-IN", {
-                  minimumFractionDigits: 2,
-                  maximumFractionDigits: 2,
-                })}`
-              : "--"}
+            {livePrice != null ? `₹${livePrice}` : "--"}
           </span>
         </div>
 
-        {/* Available Qty (optional) */}
-        <div className="text-xs text-center text-gray-600">
-          {availableQty != null ? `Available Qty: ${availableQty}` : ""}
-        </div>
-
-        {/* Order Mode */}
         <div className="flex justify-center gap-4">
           <label className="flex items-center gap-2">
             <input
@@ -220,7 +209,7 @@ export default function Sell() {
               checked={orderMode === "MARKET"}
               onChange={() => setOrderMode("MARKET")}
             />
-            <span>Sell @ Live (Market)</span>
+            <span>Market</span>
           </label>
           <label className="flex items-center gap-2">
             <input
@@ -230,36 +219,36 @@ export default function Sell() {
               checked={orderMode === "LIMIT"}
               onChange={() => setOrderMode("LIMIT")}
             />
-            <span>Sell @ My Price (Limit)</span>
+            <span>Limit</span>
           </label>
         </div>
 
-        {/* Quantity */}
         <input
           type="number"
-          inputMode="numeric"
-          pattern="\d*"
           value={qty}
           onChange={(e) => setQty(e.target.value)}
           placeholder="Quantity"
           className="w-full px-4 py-3 border rounded-lg"
         />
 
-        {/* Price (LIMIT only) */}
         <input
           type="number"
-          inputMode="decimal"
-          pattern="\d*"
           value={orderMode === "LIMIT" ? price : ""}
-          onChange={(e) => setPrice(e.target.value)}
-          placeholder={orderMode === "LIMIT" ? "Limit Price" : "Disabled for Market orders"}
+          onChange={(e) => {
+            setPrice(e.target.value);
+            userEditedPrice.current = true;
+          }}
+          placeholder={
+            orderMode === "LIMIT"
+              ? "Enter Limit Price"
+              : "Disabled for Market orders"
+          }
           className={`w-full px-4 py-3 border rounded-lg ${
             orderMode === "MARKET" ? "bg-gray-100 cursor-not-allowed" : ""
           }`}
           disabled={orderMode === "MARKET"}
         />
 
-        {/* Segment */}
         <div className="flex justify-between">
           <button
             onClick={() => setSegment("intraday")}
@@ -279,7 +268,6 @@ export default function Sell() {
           </button>
         </div>
 
-        {/* Exchange */}
         <div className="flex justify-between">
           <button
             onClick={() => setExchange("NSE")}
@@ -299,7 +287,6 @@ export default function Sell() {
           </button>
         </div>
 
-        {/* Optional SL/Target (for parity with Buy page) */}
         <input
           type="number"
           value={stoploss}
@@ -320,21 +307,28 @@ export default function Sell() {
         onClick={handleSubmit}
         disabled={submitting}
         className={`mt-6 w-full py-3 text-white text-lg font-semibold rounded-lg ${
-          submitting ? "bg-red-400 cursor-not-allowed" : "bg-red-600 hover:bg-red-700"
+          submitting
+            ? "bg-red-400 cursor-not-allowed"
+            : "bg-red-600 hover:bg-red-700"
         }`}
       >
-        {submitting ? "Placing…" : "SELL"}
+        {submitting
+          ? "Processing…"
+          : isAdd
+          ? "Add to Position"
+          : isModify
+          ? "Save Changes"
+          : "SELL"}
       </button>
 
-      {/* Success Modal */}
       {successModal && (
         <div className="fixed inset-0 bg-black bg-opacity-40 flex items-center justify-center z-50">
           <div className="bg-white p-6 rounded-xl text-center shadow-lg">
             <div className="mb-3">
-              <div className="animate-bounce text-green-600 text-6xl">✅</div>
+              <div className="animate-bounce text-red-600 text-6xl">✅</div>
             </div>
-            <p className="text-lg font-semibold text-green-700">
-              {successText || "Order is placed"}
+            <p className="text-lg font-semibold text-red-700">
+              {successText || "Order saved"}
             </p>
           </div>
         </div>

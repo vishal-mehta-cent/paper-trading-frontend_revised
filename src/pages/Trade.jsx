@@ -1,9 +1,11 @@
 import React, { useEffect, useState, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { Search, ClipboardList, User, Briefcase } from "lucide-react";
+import { Search, ClipboardList, User, Briefcase, Clock } from "lucide-react";
 import ScriptDetailsModal from "../components/ScriptDetailsModal";
 import BackButton from "../components/BackButton";
 import { moneyINR } from "../utils/format";
+
+const API = "http://127.0.0.1:8000";
 
 export default function Trade({ username }) {
   const [tab, setTab] = useState("mylist");
@@ -15,8 +17,21 @@ export default function Trade({ username }) {
   const [selectedQuote, setSelectedQuote] = useState(null);
   const [totalFunds, setTotalFunds] = useState(0);
   const [availableFunds, setAvailableFunds] = useState(0);
+
+  // SELL preview / confirm state
+  const [sellChecking, setSellChecking] = useState(false);
+  const [sellConfirmOpen, setSellConfirmOpen] = useState(false);
+  const [sellConfirmMsg, setSellConfirmMsg] = useState("");
+  const [sellPreviewData, setSellPreviewData] = useState(null);
+  const [sellSymbol, setSellSymbol] = useState(null);
+
   const intervalRef = useRef(null);
   const nav = useNavigate();
+
+  // 🔒 guard to avoid duplicate preview calls under React 18 StrictMode
+  const sellPreviewGuardRef = useRef({});
+
+  const who = username || localStorage.getItem("username") || "";
 
   useEffect(() => {
     fetchWatchlist();
@@ -24,31 +39,31 @@ export default function Trade({ username }) {
   }, [username]);
 
   function fetchWatchlist() {
-    fetch(`http://127.0.0.1:8000/watchlist/${username}`)
+    fetch(`${API}/watchlist/${who}`)
       .then((r) => r.json())
-      .then(setWatchlist);
+      .then(setWatchlist)
+      .catch(() => setWatchlist([]));
   }
 
   function fetchFunds() {
-  fetch(`http://127.0.0.1:8000/funds/available/${username}`)
-    .then((res) => {
-      if (!res.ok) {
-        throw new Error("Failed to fetch funds");
-      }
-      return res.json();
-    })
-    .then((data) => {
-      setTotalFunds(data.total_funds || 0);
-      setAvailableFunds(data.available_funds || 0);
-    })
-    .catch((err) => {
-      console.error("Error loading funds:", err);
-      setTotalFunds(0);
-      setAvailableFunds(0);
-    });
-}
+    fetch(`${API}/funds/available/${who}`)
+      .then((res) => {
+        if (!res.ok) throw new Error("Failed to fetch funds");
+        return res.json();
+      })
+      .then((data) => {
+        setTotalFunds(data.total_funds || 0);
+        setAvailableFunds(data.available_funds || 0);
+      })
+      .catch((err) => {
+        console.error("Error loading funds:", err);
+        setTotalFunds(0);
+        setAvailableFunds(0);
+      });
+  }
+
   function handleRemoveFromWatchlist(symbol) {
-    fetch(`http://127.0.0.1:8000/watchlist/${username}`, {
+    fetch(`${API}/watchlist/${who}`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ symbol }),
@@ -60,13 +75,14 @@ export default function Trade({ username }) {
     if (!watchlist.length) return;
 
     const fetchQuotes = () => {
-      fetch(`http://127.0.0.1:8000/quotes?symbols=${watchlist.join(",")}`)
+      fetch(`${API}/quotes?symbols=${watchlist.join(",")}`)
         .then((r) => r.json())
         .then((arr) => {
           const map = {};
-          arr.forEach((q) => (map[q.symbol] = q));
+          (arr || []).forEach((q) => (map[q.symbol] = q));
           setQuotes(map);
-        });
+        })
+        .catch(() => {});
     };
 
     fetchQuotes();
@@ -77,33 +93,46 @@ export default function Trade({ username }) {
   function handleSearch(e) {
     const q = e.target.value;
     setQuery(q);
-    fetch(`http://127.0.0.1:8000/search?q=${encodeURIComponent(q)}`)
+    if (!q) {
+      setSuggestions([]);
+      return;
+    }
+    fetch(`${API}/search?q=${encodeURIComponent(q)}`)
       .then((r) => r.json())
-      .then(setSuggestions);
+      .then((data) => {
+        const lower = q.toLowerCase();
+        const filtered = (data || []).filter(
+          (s) =>
+            s.symbol.toLowerCase().startsWith(lower) ||
+            s.name.toLowerCase().startsWith(lower)
+        );
+        setSuggestions(filtered);
+      })
+      .catch(() => setSuggestions([]));
   }
 
- function goDetail(sym) {
-  // Immediately fetch latest quote for the clicked symbol
-  fetch(`http://127.0.0.1:8000/quotes?symbols=${sym}`)
-    .then(r => r.json())
-    .then(arr => {
-      const latestQuote = arr.length > 0 ? arr[0] : {};
-      setSelectedSymbol(sym);
-      setSelectedQuote(latestQuote);
-      setQuery("");
-      setSuggestions([]);
-    })
-    .catch(err => {
-      console.error("Failed to fetch immediate quote:", err);
-      setSelectedSymbol(sym);
-      setSelectedQuote(quotes[sym] || {}); // fallback
-      setQuery("");
-      setSuggestions([]);
-    });
-}
+  function goDetail(sym) {
+    // fetch latest quote quickly for the modal
+    fetch(`${API}/quotes?symbols=${sym}`)
+      .then((r) => r.json())
+      .then((arr) => {
+        const latestQuote = arr.length > 0 ? arr[0] : {};
+        setSelectedSymbol(sym);
+        setSelectedQuote(latestQuote);
+        setQuery("");
+        setSuggestions([]);
+      })
+      .catch((err) => {
+        console.error("Failed to fetch immediate quote:", err);
+        setSelectedSymbol(sym);
+        setSelectedQuote(quotes[sym] || {}); // fallback
+        setQuery("");
+        setSuggestions([]);
+      });
+  }
 
   function handleAddToWatchlist() {
-    fetch(`http://127.0.0.1:8000/watchlist/${username}`, {
+    fetch(`${API}/watchlist/${who}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ symbol: selectedSymbol }),
@@ -118,19 +147,128 @@ export default function Trade({ username }) {
     setSelectedSymbol(null);
   }
 
+  // ---- SELL preview → confirm OR navigate ----
+  async function previewThenSell(sym, qty = 1, segment = "intraday") {
+    if (!who) {
+      alert("Please log in first.");
+      return;
+    }
+
+    // 👇 build a signature and guard repeated calls (StrictMode/double-render)
+    const signature = JSON.stringify({
+      sym: String(sym || "").toUpperCase(),
+      qty: Number(qty) || 1,
+      segment,
+    });
+    if (sellPreviewGuardRef.current[signature]) return;
+    sellPreviewGuardRef.current[signature] = true;
+    // auto-clear this signature after a short time so future distinct calls work
+    setTimeout(() => {
+      delete sellPreviewGuardRef.current[signature];
+    }, 1500);
+
+    try {
+      setSellChecking(true);
+
+      const body = {
+        username: who,
+        script: String(sym || "").toUpperCase(),
+        order_type: "SELL",
+        qty: Number(qty) || 1,
+        segment,
+        allow_short: false, // we ask first; don't short automatically
+      };
+
+      console.log(
+        "[TRADE SELL preview] POST",
+        `${API}/orders/sell/preview`,
+        body
+      );
+      const res = await fetch(`${API}/orders/sell/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      console.log(
+        "[TRADE SELL preview] status:",
+        res.status,
+        "payload:",
+        data
+      );
+
+      const needsConfirm =
+        data?.needs_confirmation === true ||
+        data?.code === "NEEDS_CONFIRM_SHORT" ||
+        res.status === 409 ||
+        Number(data?.owned_qty || 0) === 0;
+
+      if (res.ok && !needsConfirm) {
+        // Owns some qty → go straight to Sell
+        nav(`/sell/${sym}`, {
+          state: {
+            requestedQty: Number(qty) || 1,
+            allow_short: false,
+            preview: data,
+          },
+        });
+        setSelectedSymbol(null);
+        return;
+      }
+
+      // Show confirmation
+      setSellSymbol(String(sym || "").toUpperCase());
+      setSellPreviewData(data);
+      setSellConfirmMsg(
+        data?.message ||
+          `You have 0 qty of ${String(sym || "").toUpperCase()}. Do you still want to sell first?`
+      );
+      setSellConfirmOpen(true);
+    } catch (e) {
+      console.error("TRADE SELL preview error:", e);
+      alert("Unable to check holdings right now. Please try again.");
+    } finally {
+      setSellChecking(false);
+    }
+  }
+
   function handleSell() {
-    nav(`/sell/${selectedSymbol}`);
-    setSelectedSymbol(null);
+    // called from the ScriptDetailsModal primary SELL button
+    previewThenSell(selectedSymbol, 1, "intraday");
+  }
+
+  function highlightMatch(text, q) {
+    if (!q) return text;
+    const regex = new RegExp(`(${q})`, "ig");
+    return text.split(regex).map((part, i) =>
+      regex.test(part) ? (
+        <span key={i} className="font-bold text-blue-600">
+          {part}
+        </span>
+      ) : (
+        part
+      )
+    );
   }
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-700">
-    <BackButton to="/menu" />
       {/* Header */}
       <div className="sticky top-0 z-50 p-4 bg-white rounded-b-2xl shadow relative">
-        {/* 💰 Centered Funds Row */}
-        <div className="text-center mt-2 text-sm text-gray-100 font-medium bg-gray-800 py-2 rounded mb-3">
-          Total Funds: {moneyINR(totalFunds, { decimals: 0 })} &nbsp;|&nbsp; Available: {moneyINR(availableFunds, { decimals: 0 })}
+        <BackButton to="/menu" />
+        {/* 💰 Centered, narrower funds pill */}
+        <div className="mt-2 mb-1 w-full flex justify-center">
+          <div
+            className="w-fit max-w-[90%] inline-flex items-center gap-2
+                          rounded bg-gray-700 text-gray-100
+                          px-4 py-1.5 text-sm font-medium shadow
+                          whitespace-nowrap"
+          >
+            <span>Total Funds: {moneyINR(totalFunds, { decimals: 0 })}</span>
+            <span>|</span>
+            <span>Available: {moneyINR(availableFunds, { decimals: 0 })}</span>
+          </div>
         </div>
 
         {/* Center Title & Tabs */}
@@ -154,13 +292,20 @@ export default function Trade({ username }) {
         </div>
 
         {/* Right icons */}
-        <div className="absolute right-5 top-24 flex items-center space-x-4">
+        <div className="absolute right-5 top-20 flex items-center space-x-4">
           <div
             className="flex flex-col items-center cursor-pointer"
             onClick={() => nav("/portfolio")}
           >
             <Briefcase size={22} className="text-gray-600 hover:text-blue-600" />
             <span className="text-xs text-gray-500">Portfolio</span>
+          </div>
+          <div
+            className="flex flex-col items-center cursor-pointer"
+            onClick={() => nav("/history")}
+          >
+            <Clock size={22} className="text-gray-600 hover:text-blue-600" />
+            <span className="text-xs text-gray-500">History</span>
           </div>
           <div
             className="flex flex-col items-center cursor-pointer"
@@ -195,9 +340,15 @@ export default function Trade({ username }) {
                     onClick={() => goDetail(s.symbol)}
                     className="px-4 py-2 hover:bg-gray-100 cursor-pointer"
                   >
-                    <div className="font-semibold">{s.symbol}</div>
-                    <div className="text-sm text-gray-600">{s.name}</div>
-                    <div className="text-xs text-gray-400">Sector: {s.sector || "N/A"}</div>
+                    <div className="font-semibold">
+                      {highlightMatch(s.symbol, query)}
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {highlightMatch(s.name, query)}
+                    </div>
+                    <div className="text-xs text-gray-400">
+                      Sector: {highlightMatch(s.sector || "N/A", query)}
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -213,7 +364,7 @@ export default function Trade({ username }) {
             ) : (
               watchlist.map((sym) => {
                 const q = quotes[sym] || {};
-                const isPos = q.change >= 0;
+                const isPos = Number(q.change || 0) >= 0;
                 return (
                   <div
                     key={sym}
@@ -221,7 +372,9 @@ export default function Trade({ username }) {
                     onClick={() => goDetail(sym)}
                   >
                     <div>
-                      <div className="text-lg font-semibold text-gray-800">{sym}</div>
+                      <div className="text-lg font-semibold text-gray-800">
+                        {sym}
+                      </div>
                       <div className="text-xs text-gray-600">
                         {q.exchange || "NSE"}
                       </div>
@@ -233,13 +386,15 @@ export default function Trade({ username }) {
                             isPos ? "text-green-600" : "text-red-600"
                           }`}
                         >
-                          {q.price != null ? q.price.toLocaleString() : "--"}
+                          {q.price != null
+                            ? Number(q.price).toLocaleString("en-IN")
+                            : "--"}
                         </div>
                         <div className="text-xs text-gray-600">
                           {q.change != null
-                            ? `${isPos ? "+" : ""}${q.change.toFixed(2)} (${
+                            ? `${isPos ? "+" : ""}${Number(q.change).toFixed(2)} (${
                                 isPos ? "+" : ""
-                              }${q.pct_change.toFixed(2)}%)`
+                              }${Number(q.pct_change || 0).toFixed(2)}%)`
                             : "--"}
                         </div>
                       </div>
@@ -279,15 +434,51 @@ export default function Trade({ username }) {
         </button>
       </div>
 
-      {/* Modal */}
+      {/* Script modal */}
       <ScriptDetailsModal
         symbol={selectedSymbol}
         quote={selectedQuote}
         onClose={() => setSelectedSymbol(null)}
         onAdd={handleAddToWatchlist}
         onBuy={handleBuy}
-        onSell={handleSell}
+        onSell={handleSell} // will call previewThenSell
       />
+
+      {/* SELL confirmation modal */}
+      {sellConfirmOpen && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white p-6 rounded-lg shadow-xl text-center max-w-sm w-full">
+            <p className="mb-4 text-gray-800 font-semibold">
+              {sellConfirmMsg ||
+                `You have 0 qty of ${sellSymbol}. Do you still want to sell first?`}
+            </p>
+            <div className="flex justify-center gap-4">
+              <button
+                className="bg-gray-400 text-white px-4 py-2 rounded"
+                onClick={() => setSellConfirmOpen(false)}
+              >
+                NO
+              </button>
+              <button
+                className="bg-red-600 text-white px-4 py-2 rounded"
+                onClick={() => {
+                  setSellConfirmOpen(false);
+                  nav(`/sell/${sellSymbol}`, {
+                    state: {
+                      requestedQty: 1,
+                      allow_short: true, // user agreed
+                      preview: sellPreviewData,
+                    },
+                  });
+                  setSelectedSymbol(null);
+                }}
+              >
+                YES
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

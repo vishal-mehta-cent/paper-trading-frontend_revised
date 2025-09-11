@@ -29,7 +29,9 @@ export default function Profile({ username, logout }) {
 
       {/* Buttons */}
       <div className="space-y-3">
-        <button className="w-full border rounded p-2 text-left bg-gray-100 font-semibold">
+        <button
+          onClick={() => nav("/profile/details")} 
+          className="w-full border rounded p-2 text-left">
           👤 Profile
         </button>
         <button

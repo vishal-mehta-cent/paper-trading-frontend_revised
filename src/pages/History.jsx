@@ -1,6 +1,9 @@
 // frontend/src/pages/History.jsx
 import React, { useEffect, useState } from "react";
 import BackButton from "../components/BackButton";
+import { moneyINR } from "../utils/format";
+import { NotebookPen } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 
 const API = "http://127.0.0.1:8000";
 
@@ -27,7 +30,9 @@ export default function History({ username }) {
         console.log("Response status:", res.status);
         if (!res.ok) {
           const txt = await res.text();
-          throw new Error(`HTTP ${res.status}: ${txt || "Failed to fetch history"}`);
+          throw new Error(
+            `HTTP ${res.status}: ${txt || "Failed to fetch history"}`
+          );
         }
         return res.json();
       })
@@ -47,36 +52,42 @@ export default function History({ username }) {
     const n = Number(v);
     return Number.isFinite(n) ? n : null;
   };
-  const money = (v) => {
-    const n = asNum(v);
-    return n === null ? "—" : `₹${n.toFixed(2)}`;
-  };
+
+  const fmtMoney = (n) =>
+    n !== null && n !== undefined ? moneyINR(n, { decimals: 2 }) : "—";
+
   const dateOnly = (dt) => {
     if (!dt || typeof dt !== "string") return "—";
     const [d] = dt.split(" ");
     return d || dt;
   };
 
+  const navigate = useNavigate();
+  const goNotes = (s) =>
+    navigate(`/notes/${encodeURIComponent((s || "").toUpperCase())}`);
+
   return (
     <div className="min-h-screen bg-gray-100 p-4">
-      <BackButton to="/menu" />
+      <BackButton to="/profile" />
       <h2 className="text-2xl font-bold text-center mb-4">History</h2>
 
       {loading ? (
         <div className="text-center text-gray-500">Loading...</div>
       ) : error ? (
-        <div className="text-center text-red-600 whitespace-pre-wrap">{error}</div>
+        <div className="text-center text-red-600 whitespace-pre-wrap">
+          {error}
+        </div>
       ) : history.length === 0 ? (
         <div className="text-center text-gray-500">No history available.</div>
       ) : (
         <div className="bg-white rounded-lg overflow-hidden shadow">
-          {/* Header: 5 cols now */}
+          {/* Header */}
           <div className="grid grid-cols-5 bg-blue-700 text-white font-semibold p-3">
             <div>Time</div>
             <div>Buy Qty</div>
-            <div>Buy Price</div>
+            <div>Buy Details</div>
             <div>P&amp;L</div>
-            <div>SELL</div>
+            <div>Sell Details</div>
           </div>
 
           {history.map((t, idx) => {
@@ -84,42 +95,88 @@ export default function History({ username }) {
             const remaining = asNum(t.remaining_qty);
             const isClosedOrPartial =
               t.is_closed || (remaining !== null ? remaining < buyQty : false);
-            const rowTone = isClosedOrPartial ? "bg-gray-100 text-gray-600" : "bg-white";
+            const rowTone = isClosedOrPartial
+              ? "bg-gray-100 text-gray-600"
+              : "bg-white";
+
             const pnlNum = asNum(t.pnl) ?? 0;
             const pnlTone =
-              pnlNum > 0 ? "text-green-600" : pnlNum < 0 ? "text-red-600" : "text-gray-800";
+              pnlNum > 0
+                ? "text-green-600"
+                : pnlNum < 0
+                ? "text-red-600"
+                : "text-gray-800";
 
-            // SELL data (from backend FIFO aggregation)
             const sellQty = asNum(t.sell_qty) ?? 0;
             const sellAvg = asNum(t.sell_avg_price);
             const investedValue = asNum(t.invested_value);
+
+            const symbolUpper = (t.symbol || "—").toUpperCase();
 
             return (
               <div
                 key={`${t.symbol || "row"}-${t.time || idx}`}
                 className={`grid grid-cols-5 items-center p-3 border-t ${rowTone}`}
               >
-                {/* Time + Symbol */}
+                {/* Time + Symbol + Notes icon (inline, no new column) */}
                 <div className="flex flex-col">
-                  <span className="font-semibold">{t.symbol || "—"}</span>
-                  <span className="text-[11px] opacity-60">{t.time || ""}</span>
+                  <div className="inline-flex items-center gap-2">
+                    <span className="font-semibold">{symbolUpper}</span>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        goNotes(t.symbol || "");
+                      }}
+                      title="Notes"
+                      className="p-1 rounded hover:bg-gray-100 text-gray-700"
+                    >
+                      <NotebookPen size={14} />
+                    </button>
+                  </div>
+                  <span className="text-[11px] opacity-60">
+                    {t.time || ""}
+                  </span>
                 </div>
 
                 {/* Buy Qty */}
                 <div>{buyQty || "—"}</div>
 
-                {/* Buy Price */}
-                <div>{money(t.buy_price)}</div>
+                {/* Buy Details (date + price) */}
+                <div className="text-xs leading-tight">
+                  {t.buy_date ? (
+                    <>
+                      <div>
+                        Date:{" "}
+                        <span className="font-medium">
+                          {dateOnly(t.buy_date)}
+                        </span>
+                      </div>
+                      <div>
+                        Price:{" "}
+                        <span className="font-medium">
+                          {fmtMoney(t.buy_price)}
+                        </span>
+                      </div>
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </div>
 
-                {/* Realized P&L on sold portion of this lot */}
-                <div className={`font-medium ${pnlTone}`}>{money(pnlNum)}</div>
+                {/* Realized P&L */}
+                <div className={`font-medium ${pnlTone}`}>
+                  {fmtMoney(pnlNum)}
+                </div>
 
-                {/* SELL column */}
+                {/* SELL details */}
                 <div className="text-xs leading-tight">
                   {sellQty > 0 ? (
                     <>
                       <div>
-                        Date: <span className="font-medium">{dateOnly(t.sell_date)}</span>
+                        Date:{" "}
+                        <span className="font-medium">
+                          {dateOnly(t.sell_date)}
+                        </span>
                       </div>
                       <div>
                         Qty: <span className="font-medium">{sellQty}</span>
@@ -127,13 +184,15 @@ export default function History({ username }) {
                       <div>
                         Avg:{" "}
                         <span className="font-medium">
-                          {sellAvg !== null ? money(sellAvg) : "—"}
+                          {sellAvg !== null ? fmtMoney(sellAvg) : "—"}
                         </span>
                       </div>
                       <div>
                         Invested:{" "}
                         <span className="font-medium">
-                          {investedValue !== null ? money(investedValue) : "—"}
+                          {investedValue !== null
+                            ? fmtMoney(investedValue)
+                            : "—"}
                         </span>
                       </div>
                     </>
