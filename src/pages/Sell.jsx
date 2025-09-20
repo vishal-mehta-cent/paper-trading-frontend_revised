@@ -144,19 +144,24 @@ export default function Sell() {
       if (!res.ok) {
         const det = data?.detail;
         const msg =
-        typeof det === "string"
-          ? det
-          : det?.message || (det ? JSON.stringify(det) : "Order failed");
+          typeof det === "string"
+            ? det
+            : det?.message || (det ? JSON.stringify(det) : "Order failed");
         throw new Error(msg);
       }
 
-            if (isAdd) {
-              setSuccessText("Added to Position ✅");
-            } else if (isModify) {
-              setSuccessText("Modify Successful ✅");
-            } else {
-              setSuccessText("Sell Successful ✅");
-            }
+      // ✅ Success message mapping:
+      if (isAdd) {
+        setSuccessText("Added to Position ✅");
+      } else if (isModify) {
+        setSuccessText("Modify Successful ✅");
+      } else if (orderMode === "LIMIT") {
+        // LIMIT: generic order confirmation
+        setSuccessText("Order Successful ✅");
+      } else {
+        // MARKET: explicit Sell confirmation
+        setSuccessText("Sell Successful ✅");
+      }
 
       setSuccessModal(true);
 

@@ -103,8 +103,8 @@ export default function Trade({ username }) {
         const lower = q.toLowerCase();
         const filtered = (data || []).filter(
           (s) =>
-            s.symbol.toLowerCase().startsWith(lower) ||
-            s.name.toLowerCase().startsWith(lower)
+            s.symbol.toLowerCase().includes(lower) ||
+            s.name.toLowerCase().includes(lower)
         );
         setSuggestions(filtered);
       })

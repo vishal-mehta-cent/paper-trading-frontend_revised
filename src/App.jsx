@@ -39,7 +39,6 @@ import History from "./pages/History";
 import ModifyOrderPage from "./pages/ModifyOrderPage";
 import ProfileDetail from "./pages/ProfileDetail";
 
-
 /** Fixed logo shown on every non-auth page (rendered to body via portal) */
 function RouteAwareTopRightLogo() {
   const { pathname } = useLocation();
@@ -69,11 +68,11 @@ function RouteAwareTopRightLogo() {
 /** Auth screen with centered branding above the login/register UI */
 function AuthScreen({ onLoginSuccess }) {
   return (
-        <div className="flex-1 flex items-start justify-center px-4 pb-8">
-        <div className="w-full max-w-md">
-          <LoginRegister onLoginSuccess={onLoginSuccess} />
-        </div>
+    <div className="flex-1 flex items-start justify-center px-4 pb-8">
+      <div className="w-full max-w-md">
+        <LoginRegister onLoginSuccess={onLoginSuccess} />
       </div>
+    </div>
   );
 }
 
@@ -244,6 +243,12 @@ function AnimatedRoutes({ username, onLoginSuccess, onLogout }) {
             username ? <History username={username} /> : <Navigate to="/" replace />
           }
         />
+        <Route
+          path="/history/:username"
+          element={
+            username ? <History username={username} /> : <Navigate to="/" replace />
+          }
+        />
 
         <Route
           path="/settings"
@@ -257,13 +262,11 @@ function AnimatedRoutes({ username, onLoginSuccess, onLogout }) {
           path="/profile/details" 
           element={<ProfileDetail />} 
         />
-
         <Route
           path="/settings/change-email"
           element={username ? <EmailChange /> : <Navigate to="/" replace />}
         />
 
-        {/* Keep specific route before wildcard */}
         <Route path="/modify/:id" element={<ModifyOrderPage />} />
 
         {/* Catch-all */}

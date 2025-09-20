@@ -142,11 +142,16 @@ export default function Buy() {
       data = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(data?.detail || "Order failed");
 
+      // ✅ Success message mapping you asked for:
       if (isAdd) {
         setSuccessText("Added to Position ✅");
       } else if (isModify) {
         setSuccessText("Modify Successful ✅");
+      } else if (orderMode === "LIMIT") {
+        // LIMIT: show "Order Successful"
+        setSuccessText("Order Successful ✅");
       } else {
+        // MARKET: show "Buy Successful"
         setSuccessText("Buy Successful ✅");
       }
 
@@ -154,7 +159,8 @@ export default function Buy() {
 
       setTimeout(() => {
         setSuccessModal(false);
-        if (data.triggered) {
+        // Keep your existing redirection logic:
+        if (data && data.triggered) {
           nav("/orders", { state: { refresh: true, tab: "positions" } });
         } else {
           nav("/orders", { state: { refresh: true, tab: "open" } });
@@ -249,14 +255,6 @@ export default function Buy() {
             }`}
           >
             Intraday
-          </button>
-          <button
-            onClick={() => setSegment("delivery")}
-            className={`w-1/2 py-2 rounded-r-lg ${
-              segment === "delivery" ? "bg-blue-600 text-white" : "bg-gray-200"
-            }`}
-          >
-            Delivery
           </button>
         </div>
 

@@ -2,7 +2,15 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import BackButton from "../components/BackButton";
 import { useNavigate } from "react-router-dom";
-import { ArrowUpRight, ArrowDownRight, NotebookPen } from "lucide-react";
+import {
+  ArrowUpRight,
+  ArrowDownRight,
+  NotebookPen,
+  Download,
+  Upload,
+} from "lucide-react";
+import * as XLSX from "xlsx";
+import { saveAs } from "file-saver";
 
 // ---------- formatting helpers ----------
 const toNum = (v) => {
@@ -18,13 +26,9 @@ const money = (v) => {
         maximumFractionDigits: 2,
       })}`;
 };
-const pctText = (v) => {
-  const n = toNum(v);
-  return n === null ? "0.00%" : `${n.toFixed(2)}%`;
-};
 const signed = (n, d = 2) => `${n >= 0 ? "+" : ""}${n.toFixed(d)}`;
 
-// small pill (same look as Positions)
+// small pill
 const Chip = ({ label, value, tone = "gray" }) => {
   const toneClass =
     tone === "red"
@@ -59,9 +63,6 @@ const SegmentBadge = ({ segment }) => {
   );
 };
 
-const handleNote = (symbol) =>
-  navigate(`/notes/${encodeURIComponent(symbol)}`);
-
 export default function Portfolio({ username }) {
   const [data, setData] = useState({ open: [], closed: [] });
   const [loading, setLoading] = useState(true);
@@ -70,6 +71,11 @@ export default function Portfolio({ username }) {
   const [quotes, setQuotes] = useState({});
   const pollRef = useRef(null);
   const navigate = useNavigate();
+
+  const fileInputRef = useRef(null);
+
+  const [startDate, setStartDate] = useState("");
+  const [endDate, setEndDate] = useState("");
 
   // ------- load portfolio -------
   const load = () => {
@@ -117,13 +123,44 @@ export default function Portfolio({ username }) {
 
   useEffect(load, [username]);
 
-  // ------- poll quotes for all open holdings -------
-  useEffect(() => {
-    if (!data.open.length) return;
+  const pickDateTime = (o) =>
+    o?.datetime || o?.updated_at || o?.created_at || o?.time || o?.date || null;
 
+  const parseDate = (s) => {
+    if (!s || typeof s !== "string") return null;
+    const safe = s.includes("T") ? s : s.replace(" ", "T");
+    const d = new Date(safe);
+    return isNaN(d.getTime()) ? null : d;
+  };
+  const toLocalYMD = (d) => {
+    if (!d) return null;
+    const yr = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, "0");
+    const da = String(d.getDate()).padStart(2, "0");
+    return `${yr}-${mo}-${da}`;
+  };
+
+  const filteredOpen = useMemo(() => {
+    if (!startDate && !endDate) return data.open;
+    const start = startDate || null;
+    const end = endDate || null;
+    return (data.open || []).filter((p) => {
+      const dtRaw = pickDateTime(p);
+      const dt = parseDate(dtRaw);
+      const ymd = toLocalYMD(dt);
+      if (!ymd) return false;
+      if (start && ymd < start) return false;
+      if (end && ymd > end) return false;
+      return true;
+    });
+  }, [data.open, startDate, endDate]);
+
+  // ------- poll quotes -------
+  useEffect(() => {
+    if (!filteredOpen.length) return;
     const syms = [
       ...new Set(
-        data.open.map((p) => (p.symbol || p.script || "").toUpperCase())
+        filteredOpen.map((p) => (p.symbol || p.script || "").toUpperCase())
       ),
     ].filter(Boolean);
     if (!syms.length) return;
@@ -147,33 +184,166 @@ export default function Portfolio({ username }) {
         .catch(() => {});
     };
 
-    // initial + poll
     fetchQuotes();
     pollRef.current = setInterval(fetchQuotes, 2000);
     return () => clearInterval(pollRef.current);
-  }, [data.open]);
+  }, [filteredOpen]);
 
-  // ------- handlers -------
   const handleAdd = (symbol) => navigate(`/buy/${symbol}`);
   const handleExit = (symbol) => navigate(`/sell/${symbol}`);
   const handleCloseModal = () => setSelected(null);
-  const handleNote = (symbol) =>
-    navigate(`/notes/${encodeURIComponent((symbol || "").toUpperCase())}`); // <— go to notes page
+  const handleNoteIn = (symbol) =>
+    navigate(`/notes/${encodeURIComponent((symbol || "").toUpperCase())}`);
 
-  // totals (optional display)
+  const handleUploadClick = () => {
+    if (fileInputRef.current) fileInputRef.current.value = "";
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelected = (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    if (!file.name.toLowerCase().endsWith(".xlsx")) {
+      alert("Please select a .xlsx file.");
+      return;
+    }
+    const formData = new FormData();
+    formData.append("file", file);
+    fetch(`http://127.0.0.1:8000/portfolio/${username}/upload`, {
+      method: "POST",
+      body: formData,
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const j = await res.json().catch(() => ({}));
+          throw new Error(j?.detail || `Upload failed (HTTP ${res.status})`);
+        }
+        return res.json();
+      })
+      .then((result) => {
+        alert(`✅ Uploaded successfully. Rows inserted: ${result.rows}`);
+        load();
+      })
+      .catch((err) => {
+        console.error("Upload error:", err);
+        alert("Upload failed: " + err.message);
+      });
+  };
+
+// inside Portfolio.jsx
+
+// ===== Proper Excel (.xlsx) download =====
+const handleDownloadExcel = () => {
+  const headers = [
+    "Symbol",
+    "Name",
+    "Segment",
+    "Qty",
+    "Avg Price",
+    "Entry Price",
+    "Stoploss",
+    "Target",
+    "Live",
+    "Investment",
+    "Date",
+  ];
+
+  const rows =
+    filteredOpen && filteredOpen.length
+      ? filteredOpen.map((p) => {
+          const symbol = (p.symbol || p.script || "").toUpperCase();
+          const name = p.name || "";
+          const seg = (p.segment || "delivery").toLowerCase();
+          const qty = toNum(p.qty) ?? 0;
+          const avg = toNum(p.avg_price) ?? 0;
+          const entry = toNum(p.entry_price) ?? avg;
+          const live =
+            toNum(quotes[symbol]?.price) ??
+            toNum(p.current_price) ??
+            avg ??
+            0;
+          const sl = toNum(p.stoploss) ?? 0;
+          const tgt = toNum(p.target) ?? 0;
+          const invest = qty * (avg ?? 0);
+          const dtRaw = pickDateTime(p);
+          const ymd = toLocalYMD(parseDate(dtRaw)) || "";
+          return [
+            symbol,
+            name,
+            seg,
+            qty,
+            avg,
+            entry,
+            sl,
+            tgt,
+            live,
+            invest,
+            ymd,
+          ];
+        })
+      : [];
+
+  const worksheet = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, "Portfolio");
+
+  const excelBuffer = XLSX.write(workbook, {
+    bookType: "xlsx",
+    type: "array",
+  });
+
+  const blob = new Blob([excelBuffer], {
+    type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  });
+
+  const stamp = new Date()
+    .toISOString()
+    .slice(0, 19)
+    .replace("T", "_")
+    .replace(/:/g, "");
+
+  saveAs(blob, `portfolio_${username || "user"}_${stamp}.xlsx`);
+};
+
+
+  // Totals
   const totalInvested = useMemo(
     () =>
-      data.open.reduce(
+      filteredOpen.reduce(
         (s, p) => s + (toNum(p.avg_price) ?? 0) * (toNum(p.qty) ?? 0),
         0
       ),
-    [data.open]
+    [filteredOpen]
   );
+
+  const totalCurrentValuation = useMemo(() => {
+    return filteredOpen.reduce((s, p) => {
+      const symbol = (p.symbol || p.script || "").toUpperCase();
+      const qty = toNum(p.qty) ?? 0;
+      const live =
+        toNum(quotes[symbol]?.price) ??
+        toNum(p.current_price) ??
+        toNum(p.avg_price) ??
+        0;
+      return s + qty * live;
+    }, 0);
+  }, [filteredOpen, quotes]);
+
+  const totalPnL = useMemo(
+    () => totalCurrentValuation - totalInvested,
+    [totalCurrentValuation, totalInvested]
+  );
+  const totalPnLPct = useMemo(() => {
+    if (!totalInvested) return 0;
+    return (totalPnL / totalInvested) * 100;
+  }, [totalPnL, totalInvested]);
 
   return (
     <div className="p-4">
       <BackButton to="/menu" />
-      <h2 className="text-center text-xl font-bold text-blue-600">Portfolio</h2>
+      <h2 className="text-center text-xl font-bold text-blue-600">
+        Portfolio
+      </h2>
 
       {loading && <div className="text-center text-gray-500">Loading…</div>}
 
@@ -184,47 +354,96 @@ export default function Portfolio({ username }) {
       {!loading && !error && (
         <>
           {/* Summary */}
-          <div className="text-center mt-3 mb-2">
-            <span className="inline-block px-4 py-2 bg-white rounded-xl shadow text-sm font-semibold">
-              Total Invested: {money(totalInvested)}
-            </span>
+          <div className="text-center mt-3">
+            <div className="inline-flex flex-wrap items-center gap-2">
+              <span className="inline-block px-4 py-2 bg-white rounded-xl shadow text-sm font-semibold">
+                Total Invested: {money(totalInvested)}
+              </span>
+              <span className="inline-block px-4 py-2 bg-white rounded-xl shadow text-sm font-semibold">
+                Current Valuation: {money(totalCurrentValuation)}
+              </span>
+              <span
+                className={`inline-block px-4 py-2 rounded-xl shadow text-sm font-semibold ${
+                  totalPnL >= 0
+                    ? "bg-emerald-50 text-emerald-700"
+                    : "bg-rose-50 text-rose-700"
+                }`}
+              >
+                P&L: {money(totalPnL)} ({signed(totalPnLPct, 2)}%)
+              </span>
+            </div>
+          </div>
+
+          {/* Buttons */}
+          <div className="mt-3 mb-2 flex items-center justify-center gap-3">
+            <button
+              onClick={handleDownloadExcel}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-blue-600 text-white hover:bg-blue-700"
+            >
+              <Download size={16} />
+              <span>Download</span>
+            </button>
+
+            <button
+              onClick={handleUploadClick}
+              className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gray-700 text-white hover:bg-gray-800"
+            >
+              <Upload size={16} />
+              <span>Upload</span>
+            </button>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx"
+              className="hidden"
+              onChange={handleFileSelected}
+            />
           </div>
 
           {/* Open Holdings */}
-          <h3 className="text-center text-lg font-semibold mt-3 mb-4">
+          <h3 className="text-center text-lg font-semibold mt-3">
             Open Holdings
           </h3>
 
-          {data.open.length === 0 ? (
+          {filteredOpen.length === 0 ? (
             <div className="text-center text-sm text-gray-500">
-              No holdings in portfolio.
+              No holdings in portfolio
             </div>
           ) : (
             <div className="space-y-3">
-              {data.open.map((p, i) => {
+              {filteredOpen.map((p, i) => {
                 const symbol = (p.symbol || p.script || "").toUpperCase();
                 const seg = (p.segment || "delivery").toLowerCase();
 
                 const qty = toNum(p.qty) ?? 0;
                 const avg = toNum(p.avg_price) ?? 0;
-                const entry = toNum(p.entry_price) ?? avg; // fall back to avg
+                const entry = toNum(p.entry_price) ?? avg;
                 const sl = toNum(p.stoploss) ?? 0;
                 const tgt = toNum(p.target) ?? 0;
 
                 const invest = qty * avg;
-
                 const q = quotes[symbol] || {};
                 const live = toNum(q.price) ?? toNum(p.current_price) ?? avg;
 
-                // ---- RIGHT SIDE CALC (match Positions/OpenTrades) ----
-                const perShare = entry && live ? live - entry : 0; // live - entry
-                const absPct = entry ? (perShare / entry) * 100 : 0; // %
-                const total = perShare * qty; // (live - entry) * qty
+                const perShare = entry && live ? live - entry : 0;
+                const absPct = entry ? (perShare / entry) * 100 : 0;
+                const total = perShare * qty;
+
+                const currentVal = (toNum(live) ?? 0) * (qty ?? 0);
+                const cardPnL = currentVal - invest;
 
                 const pnlColor =
                   total > 0
                     ? "text-green-600"
                     : total < 0
+                    ? "text-red-600"
+                    : "text-gray-600";
+
+                const footerPnlColor =
+                  cardPnL > 0
+                    ? "text-green-600"
+                    : cardPnL < 0
                     ? "text-red-600"
                     : "text-gray-600";
 
@@ -241,14 +460,12 @@ export default function Portfolio({ username }) {
                       })
                     }
                   >
-                    {/* Top meta row */}
                     <div className="flex justify-between text-sm">
                       <span className="text-green-600 font-semibold">
                         BUY • {qty} Qty
                       </span>
                     </div>
 
-                    {/* Main row */}
                     <div className="mt-1 flex items-start justify-between gap-2">
                       <div>
                         <div className="text-xl font-bold text-gray-800">
@@ -268,34 +485,26 @@ export default function Portfolio({ username }) {
                         </div>
                       </div>
 
-                      {/* RIGHT SIDE — identical idea to Positions */}
                       <div className="flex items-start gap-2 pr-1">
                         <div className="w-8 h-8 mt-0.5 rounded-lg bg-blue-100 flex items-center justify-center">
                           {total >= 0 ? (
                             <ArrowUpRight size={16} className="text-blue-700" />
                           ) : (
-                            <ArrowDownRight
-                              size={16}
-                              className="text-blue-700"
-                            />
+                            <ArrowDownRight size={16} className="text-blue-700" />
                           )}
                         </div>
                         <div className="text-right">
-                          {/* (live - entry) * qty */}
                           <div className={`text-base font-semibold ${pnlColor}`}>
                             {money(total)}
                           </div>
-                          {/* live - entry  and  absolute % */}
                           <div className={`text-xs mt-1 ${pnlColor}`}>
                             {signed(perShare, 4)} ({signed(absPct, 2)}%)
                           </div>
-                          {/* Notes button */}
                           <button
                             onClick={(e) => {
-                              e.stopPropagation(); // prevent opening the modal
-                              handleNote(symbol);
+                              e.stopPropagation();
+                              handleNoteIn(symbol);
                             }}
-                            title="Add / View Notes"
                             className="inline-flex items-center gap-1 text-xs mt-2 px-2 py-1 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700"
                           >
                             <NotebookPen size={14} />
@@ -305,17 +514,21 @@ export default function Portfolio({ username }) {
                       </div>
                     </div>
 
-                    {/* Chips row — show SL/Target */}
                     <div className="flex flex-wrap gap-2 mt-2">
                       <Chip label="Entry Price" value={money(entry)} />
                       <Chip label="SL" value={money(sl)} tone="red" />
                       <Chip label="Target" value={money(tgt)} tone="green" />
                     </div>
 
-                    {/* Footer line */}
-                    <div className="flex justify-between text-xs mt-2">
+                    <div className="flex flex-wrap items-center gap-3 text-xs mt-2">
                       <span className="text-gray-500">
                         NSE | Total Investment={money(invest)}
+                      </span>
+                      <span className="text-gray-600">
+                        Current Valuation={money(currentVal)}
+                      </span>
+                      <span className={`${footerPnlColor}`}>
+                        P&L={money(cardPnL)}
                       </span>
                     </div>
                   </div>
@@ -326,11 +539,9 @@ export default function Portfolio({ username }) {
         </>
       )}
 
-      {/* Modal (Add / Exit / Close) */}
       {selected && (
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50 z-50">
           <div className="bg-white rounded-xl shadow-lg p-6 w-96 relative">
-            {/* Close X */}
             <button
               onClick={handleCloseModal}
               className="absolute top-2 right-2 text-gray-500 hover:text-gray-700 text-lg font-bold"
@@ -345,9 +556,8 @@ export default function Portfolio({ username }) {
             <div className="text-2xl font-extrabold text-center">
               {money(selected.live)}
             </div>
-            <div className="text-center mb-4 text-gray-500"> </div>
 
-            <div className="space-y-1 text-sm">
+            <div className="space-y-1 text-sm mt-4">
               <div>Qty: {selected.qty}</div>
               <div>Avg Price: {money(selected.avg_price)}</div>
               <div>
@@ -370,7 +580,6 @@ export default function Portfolio({ username }) {
               </div>
             </div>
 
-            {/* Actions */}
             <div className="flex justify-around border-t pt-4 mt-4">
               <button
                 onClick={() => {

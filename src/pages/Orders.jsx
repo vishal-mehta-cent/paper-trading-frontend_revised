@@ -529,7 +529,10 @@ export default function Orders({ username }) {
               const sl = toNum(o.stoploss);
               const tgt = toNum(o.target);
 
-              const disabledRow = ((isSell && !o.short_first) || o.status === "Closed");
+              
+
+              //const disabledRow = ((isSell && !o.short_first) || o.status === "Closed");
+              const disabledRow = !!o.inactive;
 
               return (
                 <div
@@ -643,18 +646,12 @@ export default function Orders({ username }) {
                   Modify
                 </button>
                 <button
-                  onClick={() => handleCancel(selectedOrder.id)}
-                  className="bg-gray-500 hover:bg-gray-600 text-white py-2 rounded-lg"
-                >
-                  Cancel
-                </button>
-                <button
                   disabled={busy}
                   onClick={handleClose}
                   className={`${busy ? "opacity-60" : ""} bg-gray-700 hover:bg-gray-800 text-white py-2 rounded-lg`}
                   title="Cancel all open orders for this script and remove today's executed rows, refunding today’s BUY amounts"
                 >
-                  Close
+                  Cancel
                 </button>
               </div>
             ) : (
@@ -671,13 +668,6 @@ export default function Orders({ username }) {
                   className="bg-red-500 hover:bg-red-600 text-white py-2 rounded-lg"
                 >
                   Exit
-                </button>
-                <button
-                  disabled={busy}
-                  onClick={handleClose}
-                  className={`${busy ? "opacity-60" : ""} bg-gray-700 hover:bg-gray-800 text-white py-2 rounded-lg`}
-                >
-                  Close
                 </button>
               </div>
             )}

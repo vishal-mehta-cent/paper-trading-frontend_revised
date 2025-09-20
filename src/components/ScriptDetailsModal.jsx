@@ -1,7 +1,7 @@
-import React from "react";
+// frontend/src/components/ScriptDetailsModal.jsx
+import React, { useState } from "react";
 import { createPortal } from "react-dom";
-import { useNavigate } from "react-router-dom";
-import { useLocation } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 export default function ScriptDetailsModal({
   symbol,
@@ -10,6 +10,7 @@ export default function ScriptDetailsModal({
   onAdd,
   onBuy,
   onSell,
+  hasPosition = false, // ✅ pass true if user already owns the script
 }) {
   // if closed, render nothing
   if (!symbol) return null;
@@ -18,10 +19,29 @@ export default function ScriptDetailsModal({
   const sym = (symbol || quote?.symbol || "").toString().toUpperCase();
   const loc = useLocation();
 
+  const [showConfirmSellFirst, setShowConfirmSellFirst] = useState(false);
+
   const handleAddNotes = () => {
     // If your route is /notes (without :symbol), change to:
     // navigate("/notes", { state: { symbol: sym } })
     navigate(`/notes/${sym}`, { state: { symbol: sym } });
+  };
+
+  const handleSellClick = () => {
+    // If user doesn't own it, ask for SELL FIRST confirmation on top of this modal
+    if (!hasPosition) {
+      setShowConfirmSellFirst(true);
+    } else {
+      // Normal sell flow
+      onSell && onSell(false);
+      onClose && onClose();
+    }
+  };
+
+  const confirmSellFirst = () => {
+    setShowConfirmSellFirst(false);
+    onSell && onSell(true); // hint to parent that this is SELL FIRST
+    onClose && onClose();
   };
 
   // Render inside a portal with a stable key to silence the React warning
@@ -31,7 +51,8 @@ export default function ScriptDetailsModal({
       key={sym} /* ← stable key fixes "Expected static flag" warning */
       className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50"
     >
-      <div className="bg-white w-full max-w-md md:rounded-xl rounded-t-2xl md:h-auto h-[70%] overflow-auto p-6">
+      {/* relative so the inline confirm can overlay INSIDE this panel */}
+      <div className="relative bg-white w-full max-w-md md:rounded-xl rounded-t-2xl md:h-auto h-[70%] overflow-auto p-6">
         <div className="flex justify-between items-center mb-4">
           <h2 className="text-xl font-semibold">{sym}</h2>
           <button onClick={onClose} className="text-gray-500">
@@ -48,8 +69,10 @@ export default function ScriptDetailsModal({
           </div>
           <div>
             Change:{" "}
-            {Number.isFinite(quote?.change) ? quote.change.toFixed(2) : "--"} (
-            {Number.isFinite(quote?.pct_change) ? quote.pct_change.toFixed(2) : "--"}
+            {Number.isFinite(quote?.change) ? Number(quote.change).toFixed(2) : "--"} (
+            {Number.isFinite(quote?.pct_change)
+              ? Number(quote.pct_change).toFixed(2)
+              : "--"}
             %)
           </div>
           <div>
@@ -71,7 +94,7 @@ export default function ScriptDetailsModal({
             Buy
           </button>
           <button
-            onClick={onSell}
+            onClick={handleSellClick}
             className="bg-red-600 text-white px-4 py-2 rounded-lg"
           >
             Sell
@@ -98,6 +121,34 @@ export default function ScriptDetailsModal({
             📝 Add Notes
           </button>
         </div>
+
+        {/* ✅ Inline SELL FIRST confirmation overlay inside this modal */}
+        {showConfirmSellFirst && (
+          <div className="absolute inset-0 bg-black/40 flex items-center justify-center z-10">
+            <div className="bg-white rounded-xl p-5 w-full max-w-sm shadow-lg">
+              <p className="text-center text-gray-800 mb-5">
+                You didn&apos;t buy{" "}
+                <span className="font-semibold">{sym}</span>.
+                <br />
+                Do you still want to sell first?
+              </p>
+              <div className="flex justify-center gap-3">
+                <button
+                  onClick={() => setShowConfirmSellFirst(false)}
+                  className="px-4 py-2 rounded-lg bg-gray-200 text-gray-800"
+                >
+                  NO
+                </button>
+                <button
+                  onClick={confirmSellFirst}
+                  className="px-4 py-2 rounded-lg bg-red-600 text-white"
+                >
+                  YES
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
