@@ -1,22 +1,20 @@
 // src/lib/api.js
-// Single source of truth for backend base URL.
-// Reads from Vercel/Vite env at build time, then falls back to a safe default.
 
-const ENV_BASE =
-  (typeof import !== "undefined" && typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_BACKEND_BASE_URL) ||
-  (typeof window !== "undefined" && window.__ENV && window.__ENV.VITE_BACKEND_BASE_URL) ||
-  "https://paper-trading-backend-sqllite.onrender.com";
+// Prefer a simple, parse-safe fallback without clever inline comparisons.
+const RAW = (typeof import.meta !== 'undefined' && import.meta.env)
+  ? import.meta.env.VITE_BACKEND_BASE_URL
+  : undefined;
 
-export const API_BASE = String(ENV_BASE).replace(/\/+$/, "");
+export const API_BASE_URL =
+  (typeof RAW === 'string' && RAW.trim() !== '')
+    ? RAW.trim()
+    : 'http://127.0.0.1:8000';
 
-export function joinApi(path) {
-  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
-}
-
-export async function apiFetch(pathOrReq, options) {
-  // Convenience for typed calls
-  if (typeof pathOrReq === "string") {
-    return fetch(joinApi(pathOrReq), options);
-  }
-  return fetch(pathOrReq, options);
+// (example) small fetch wrapper so imports elsewhere stay unchanged:
+export async function api(path, options = {}) {
+  const res = await fetch(`${API_BASE_URL}${path}`, {
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options,
+  });
+  return res;
 }
