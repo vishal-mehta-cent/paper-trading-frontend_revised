@@ -25,7 +25,7 @@ ChartJS.register(
   Tooltip
 );
 
-const API = "http://127.0.0.1:8000";
+const API = import.meta.env.VITE_BACKEND_BASE_URL || "https://paper-trading-backend.onrender.com";
 
 const getUsername = (propUser) => propUser || localStorage.getItem("username") || "";
 
