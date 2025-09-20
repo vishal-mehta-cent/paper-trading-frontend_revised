@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
 
-const API = "http://localhost:8000";
+const API = import.meta.env.VITE_BACKEND_BASE_URL || "https://paper-trading-backend.onrender.com";
 
 // helpers
 const toNum = (v) => {
