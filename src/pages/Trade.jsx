@@ -5,7 +5,7 @@ import ScriptDetailsModal from "../components/ScriptDetailsModal";
 import BackButton from "../components/BackButton";
 import { moneyINR } from "../utils/format";
 
-const API = "http://127.0.0.1:8000";
+const API = import.meta.env.VITE_BACKEND_BASE_URL || "https://paper-trading-backend.onrender.com";
 
 export default function Trade({ username }) {
   const [tab, setTab] = useState("mylist");
