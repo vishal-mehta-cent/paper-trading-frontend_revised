@@ -1,1 +1,0 @@
-// Deprecated file kept for compatibility. Use src/lib/api.js instead.\nexport { API_BASE, apiFetch } from "./lib/api";\n

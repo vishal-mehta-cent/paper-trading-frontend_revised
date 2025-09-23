@@ -1,22 +1,74 @@
-// src/lib/api.js
-// Single source of truth for backend base URL.
-// Reads from Vercel/Vite env at build time, then falls back to a safe default.
+﻿/**
+ * frontend/src/lib/api.js
+ * Auto-detect baseURL for API calls
+ */
 
+const isBrowser =
+  typeof window !== "undefined" && typeof document !== "undefined";
+
+const hasImportMeta =
+  typeof import.meta !== "undefined" &&
+  import.meta &&
+  typeof import.meta.env !== "undefined";
+
+// 1. If `.env` has VITE_API_BASE_URL → always prefer it
 const ENV_BASE =
-  (typeof import !== "undefined" && typeof import.meta !== "undefined" && import.meta.env && import.meta.env.VITE_BACKEND_BASE_URL) ||
-  (typeof window !== "undefined" && window.__ENV && window.__ENV.VITE_BACKEND_BASE_URL) ||
-  "https://paper-trading-backend-sqllite.onrender.com";
+  hasImportMeta && import.meta.env?.VITE_API_BASE_URL
+    ? String(import.meta.env.VITE_API_BASE_URL).trim()
+    : "";
 
-export const API_BASE = String(ENV_BASE).replace(/\/+$/, "");
+// 2. Fallbacks
+const DEFAULTS = {
+  localDev: "http://localhost:8000",   // when running frontend locally
+  emulator: "http://10.0.2.2:8000",    // Android Studio emulator
+  genymotion: "http://10.0.3.2:8000",  // Genymotion emulator
+  production: "https://neurocrest.in", // deployed backend
+};
 
-export function joinApi(path) {
-  return `${API_BASE}${path.startsWith("/") ? path : `/${path}`}`;
-}
+// 3. Detect best base URL
+function inferBase() {
+  if (ENV_BASE) return ENV_BASE;
 
-export async function apiFetch(pathOrReq, options) {
-  // Convenience for typed calls
-  if (typeof pathOrReq === "string") {
-    return fetch(joinApi(pathOrReq), options);
+  if (isBrowser) {
+    const host = window.location.hostname;
+
+    // Local dev on browser
+    if (host === "localhost" || host === "127.0.0.1") return DEFAULTS.localDev;
+
+    // Android Emulator check
+    if (host.startsWith("10.0.2.")) return DEFAULTS.emulator;
+
+    // Genymotion check
+    if (host.startsWith("10.0.3.")) return DEFAULTS.genymotion;
+
+    // Default → production API
+    return DEFAULTS.production;
   }
-  return fetch(pathOrReq, options);
+
+  // Server-side rendering or fallback
+  return DEFAULTS.production;
 }
+
+
+const BASE_URL = inferBase();
+
+export const API_BASE = BASE_URL;
+
+
+async function apiFetch(path, options = {}) {
+  const url = `${BASE_URL}${path}`;
+  const res = await fetch(url, {
+    ...options,
+    headers: {
+      "Content-Type": "application/json",
+      ...(options.headers || {}),
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`API ${res.status}: ${text}`);
+  }
+  return res.json();
+}
+
+export { BASE_URL, apiFetch };

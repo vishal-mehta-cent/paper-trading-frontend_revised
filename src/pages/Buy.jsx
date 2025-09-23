@@ -256,6 +256,14 @@ export default function Buy() {
           >
             Intraday
           </button>
+          <button
+            onClick={() => setSegment("delivery")}
+            className={`w-1/2 py-2 rounded-r-lg ${
+              segment === "delivery" ? "bg-blue-600 text-white" : "bg-gray-200"
+            }`}
+          >
+            Delivery
+          </button>
         </div>
 
         <div className="flex justify-between">
