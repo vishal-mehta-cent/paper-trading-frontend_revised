@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+HEAD
 // src/lib/api.js
 
 // Safely read the env at build time; no fragile ==/?: around the token.
@@ -24,7 +24,6 @@ export async function api(path, options = {}) {
   });
   return res;
 }
-=======
 ﻿/**
  * frontend/src/lib/api.js
  * Auto-detect baseURL for API calls
@@ -79,8 +78,6 @@ function inferBase() {
 
 const BASE_URL = inferBase();
 
-export const API_BASE = BASE_URL;
-
 
 async function apiFetch(path, options = {}) {
   const url = `${BASE_URL}${path}`;
@@ -99,4 +96,4 @@ async function apiFetch(path, options = {}) {
 }
 
 export { BASE_URL, apiFetch };
->>>>>>> e781065a4c9faa3569ea25cb27855e072f84e599
+e781065a4c9faa3569ea25cb27855e072f84e599
