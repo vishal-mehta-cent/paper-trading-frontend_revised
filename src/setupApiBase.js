@@ -1,7 +1,10 @@
 // src/setupApiBase.js
 // Global fetch shim: redirects any hard-coded localhost calls to API_BASE.
 
-import { API_BASE } from "./lib/api";
+// src/setupApiBase.js
+// Global fetch shim: redirects any hard-coded localhost calls to API_BASE.
+
+import { API_BASE } from "../src/lib/api.js";
 
 (function setupFetchShim() {
   if (typeof window === "undefined" || typeof window.fetch !== "function") return;

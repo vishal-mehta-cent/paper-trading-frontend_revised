@@ -1,1 +1,1 @@
-// Deprecated constants file. Use src/lib/api.js instead.\nexport { API_BASE } from "./lib/api";\n
+// legacy no-op; kept for backward compatibility\n

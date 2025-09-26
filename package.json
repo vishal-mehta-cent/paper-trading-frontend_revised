@@ -3,7 +3,6 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "preinstall": "node -e \"if (process.platform !== 'win32') require('child_process').execSync('ls node_modules/.bin', { stdio: 'inherit' })\"",
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview"
@@ -31,6 +30,13 @@
     "autoprefixer": "^10.4.0",
     "postcss": "^8.4.0",
     "tailwindcss": "^3.4.0",
+<<<<<<< HEAD
     "vite": "^7.1.6"
+=======
+    "vite": "^7.1.7"
+  },
+  "engines": {
+    "node": "20.x"
+>>>>>>> e781065a4c9faa3569ea25cb27855e072f84e599
   }
 }
